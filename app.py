@@ -16,6 +16,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 import os
+import winreg
 
 # Page configuration
 st.set_page_config(
@@ -70,32 +71,35 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+def get_chrome_path():
+    """Get Chrome path from Windows Registry"""
+    try:
+        # Try to get path from Registry
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe") as key:
+            return winreg.QueryValue(key, None)
+    except WindowsError:
+        try:
+            # Try current user if not found in HKLM
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe") as key:
+                return winreg.QueryValue(key, None)
+        except WindowsError:
+            return None
+
 def initialize_driver():
     if st.session_state.driver is None:
         try:
             chrome_options = Options()
-            chrome_options.add_argument('--headless=new')  # Updated headless mode syntax
+            chrome_options.add_argument('--headless=new')
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--disable-gpu')
             
-            # Common Chrome installation paths on Windows
-            chrome_paths = [
-                "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-                "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-                os.path.expanduser("~") + "\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe"
-            ]
-            
-            chrome_found = False
-            for path in chrome_paths:
-                if os.path.exists(path):
-                    chrome_options.binary_location = path
-                    chrome_found = True
-                    break
-            
-            if not chrome_found:
-                st.error("Google Chrome not found in common installation paths.")
-                st.error("Please install Google Chrome and try again.")
+            # Get Chrome path from Registry
+            chrome_path = get_chrome_path()
+            if chrome_path and os.path.exists(chrome_path):
+                chrome_options.binary_location = chrome_path
+            else:
+                st.error("Could not detect Chrome installation. Please make sure Chrome is properly installed.")
                 return None
             
             service = Service(ChromeDriverManager(version="latest").install())
@@ -113,7 +117,7 @@ def initialize_driver():
                 
         except Exception as e:
             st.error(f"Failed to initialize Chrome driver: {str(e)}")
-            st.error("Please make sure Google Chrome is installed and up to date.")
+            st.error("Please make sure Chrome is installed and up to date.")
             return None
 
 def cleanup_driver():
