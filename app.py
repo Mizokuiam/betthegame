@@ -113,12 +113,13 @@ class CrashGameMonitor:
             
             # Try to find and click the login button in the header
             login_selectors = [
-                ".header__auth [data-name='login']",  # Main login button in header
-                ".header__auth a:contains('LOG IN')",  # Text-based selector
-                "//div[contains(@class, 'header__auth')]//a[contains(text(), 'LOG IN')]",  # XPath for header login
-                "//a[contains(@class, 'login')]",  # Generic login class
-                "#loginButton",  # Possible ID
-                ".header-login-btn"  # Another possible class
+                "[data-name='login']",  # Direct data attribute
+                ".header__auth [data-name='login']",  # Header auth section
+                ".header__auth a",  # Any auth link
+                "//a[contains(@data-name, 'login')]",  # XPath with data attribute
+                "//div[contains(@class, 'header__auth')]//a",  # Any auth link in header
+                ".login-button",  # Generic login class
+                "#loginButton"  # Possible ID
             ]
 
             clicked = False
@@ -134,9 +135,11 @@ class CrashGameMonitor:
                     
                     # Try multiple click methods
                     try:
+                        # Direct click
                         login_button.click()
                     except:
                         try:
+                            # JavaScript click
                             self.driver.execute_script("arguments[0].click();", login_button)
                         except:
                             continue
@@ -148,17 +151,27 @@ class CrashGameMonitor:
                     continue
 
             if not clicked:
-                # Try direct JavaScript injection
+                # Try direct JavaScript injection to find and click login
                 st.sidebar.text("Trying JavaScript injection...")
                 js_show_login = """
                     function findAndClickLogin() {
-                        // Try to find the login button in the header
-                        const headerButtons = document.querySelectorAll('.header__auth a, .header-login-btn, [data-name="login"]');
-                        for (const button of headerButtons) {
-                            if (button.textContent.toLowerCase().includes('log in') || 
-                                button.getAttribute('data-name') === 'login') {
-                                button.click();
-                                return true;
+                        // Try all possible login elements
+                        const selectors = [
+                            '[data-name="login"]',
+                            '.header__auth a',
+                            '.login-button',
+                            '#loginButton'
+                        ];
+                        
+                        for (const selector of selectors) {
+                            const elements = document.querySelectorAll(selector);
+                            for (const el of elements) {
+                                try {
+                                    el.click();
+                                    return true;
+                                } catch(e) {
+                                    continue;
+                                }
                             }
                         }
                         return false;
@@ -173,33 +186,68 @@ class CrashGameMonitor:
 
             time.sleep(2)  # Wait for login form
 
-            # Try to fill login form using JavaScript based on the actual form structure
+            # Try to fill login form using JavaScript
             js_fill_login = f"""
-                function fillLogin() {{
-                    // Find login form inputs
-                    const loginInput = document.querySelector('input[placeholder="ID or Email"]') ||
-                                     document.querySelector('input[type="text"]');
-                    const passwordInput = document.querySelector('input[type="password"]');
+                function fillLoginForm() {{
+                    // Try all possible input selectors
+                    const usernameSelectors = [
+                        'input[name="login"]',
+                        'input[type="text"]',
+                        'input[placeholder*="ID"]',
+                        'input[placeholder*="Email"]'
+                    ];
                     
-                    if (loginInput && passwordInput) {{
+                    const passwordSelectors = [
+                        'input[name="password"]',
+                        'input[type="password"]'
+                    ];
+                    
+                    let usernameField = null;
+                    let passwordField = null;
+                    
+                    // Find username field
+                    for (const selector of usernameSelectors) {{
+                        const field = document.querySelector(selector);
+                        if (field) {{
+                            usernameField = field;
+                            break;
+                        }}
+                    }}
+                    
+                    // Find password field
+                    for (const selector of passwordSelectors) {{
+                        const field = document.querySelector(selector);
+                        if (field) {{
+                            passwordField = field;
+                            break;
+                        }}
+                    }}
+                    
+                    if (usernameField && passwordField) {{
                         // Fill in credentials
-                        loginInput.value = '{username}';
-                        passwordInput.value = '{password}';
+                        usernameField.value = '{username}';
+                        passwordField.value = '{password}';
                         
-                        // Find and click the green login button
-                        const loginButton = document.querySelector('.green-button') ||
-                                          document.querySelector('button.login-button') ||
-                                          Array.from(document.querySelectorAll('button')).find(b => 
-                                              b.textContent.trim().toLowerCase() === 'log in');
+                        // Find and click submit button
+                        const submitSelectors = [
+                            'button[type="submit"]',
+                            '.green-button',
+                            '.login-button',
+                            'button.submit',
+                            'input[type="submit"]'
+                        ];
                         
-                        if (loginButton) {{
-                            loginButton.click();
-                            return true;
+                        for (const selector of submitSelectors) {{
+                            const submitBtn = document.querySelector(selector);
+                            if (submitBtn) {{
+                                submitBtn.click();
+                                return true;
+                            }}
                         }}
                     }}
                     return false;
                 }}
-                return fillLogin();
+                return fillLoginForm();
             """
             
             form_filled = self.driver.execute_script(js_fill_login)
@@ -209,13 +257,14 @@ class CrashGameMonitor:
 
             time.sleep(3)  # Wait for login to complete
 
-            # Verify login success by checking balance with updated selectors
+            # Verify login success
             try:
                 balance_selectors = [
                     ".header-balance-sum",
                     ".main-balance",
                     "//div[contains(@class, 'header-balance')]//span",
-                    "//div[contains(text(), 'MAD')]"
+                    "//div[contains(text(), 'MAD')]",
+                    ".balance-value"
                 ]
                 
                 for selector in balance_selectors:
@@ -230,6 +279,9 @@ class CrashGameMonitor:
                             self.balance = float(balance_text.replace('MAD', '').strip())
                             st.sidebar.success(f"Logged in successfully! Balance: {self.balance} MAD")
                             self.logged_in = True
+                            
+                            # Navigate to crash game
+                            self.driver.get("https://1xbet.com/en/allgamesentrance/crash")
                             return True
                     except:
                         continue
