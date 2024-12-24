@@ -31,9 +31,9 @@ ENV/
 *.swp
 *.swo
 
-# Project specific
-crash_history.json
-*.log
-
 # Streamlit
-.streamlit/
+.streamlit/secrets.toml
+
+# OS
+.DS_Store
+Thumbs.db

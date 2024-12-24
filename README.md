@@ -1,27 +1,35 @@
-# 1xBet Crash Game Analyzer
+# CrashPredict AI
 
-A Streamlit web application for analyzing and monitoring the 1xBet crash game patterns.
+An advanced AI-powered tool that uses machine learning to analyze and predict crash game outcomes with precision.
 
 ## Features
-- Real-time game monitoring
-- Pattern analysis and predictions
-- Historical data visualization
-- Betting recommendations
-- Statistics dashboard
 
-## Setup
-1. Install requirements:
+- Real-time data scraping from betting platforms
+- Machine learning-based prediction using XGBoost
+- Interactive web interface built with Streamlit
+- Historical data analysis and visualization
+- Win probability predictions
+
+## Installation
+
+1. Clone this repository
+2. Install the required dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-2. Run the app:
+## Usage
+
+1. Start the application:
 ```bash
 streamlit run app.py
 ```
 
-## Usage
-1. Start the app and click "Start Monitoring"
-2. Watch real-time crash values
-3. View statistics and recommendations
-4. Use the analysis to inform betting decisions
+2. Use the interface:
+   - Click "Scrape New Data" to gather fresh data
+   - Enter your bet amount and target odds
+   - Click "Predict" to get win probability
+
+## Note
+
+This tool is for educational purposes only. Gambling involves risk and should be approached responsibly.
