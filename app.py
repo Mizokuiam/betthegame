@@ -18,6 +18,7 @@ import traceback
 import plotly.express as px
 import random
 import os
+import winreg
 
 class CrashGameMonitor:
     def __init__(self):
@@ -32,24 +33,33 @@ class CrashGameMonitor:
     @staticmethod
     def get_browser_path():
         """Get the path to Chrome executable on Windows"""
-        # Check Chrome locations
-        chrome_paths = [
-            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-            r"C:\Users\mrmiz\AppData\Local\Google\Chrome\Application\chrome.exe",
-            # Add more potential Chrome locations
-            os.path.join(os.environ.get('LOCALAPPDATA', ''), r"Google\Chrome\Application\chrome.exe"),
-            os.path.join(os.environ.get('PROGRAMFILES', ''), r"Google\Chrome\Application\chrome.exe"),
-            os.path.join(os.environ.get('PROGRAMFILES(X86)', ''), r"Google\Chrome\Application\chrome.exe")
-        ]
-        
-        # Try Chrome first
-        for path in chrome_paths:
-            if os.path.exists(path):
-                st.info("Found Chrome browser")
-                return path
-                
-        return None
+        try:
+            import winreg
+            # Try to get Chrome path from registry
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe") as key:
+                chrome_path = winreg.QueryValue(key, None)
+                if os.path.exists(chrome_path):
+                    return chrome_path
+
+            # Fallback to common installation paths
+            chrome_paths = [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                os.path.join(os.environ.get('LOCALAPPDATA', ''), r"Google\Chrome\Application\chrome.exe"),
+                os.path.join(os.environ.get('PROGRAMFILES', ''), r"Google\Chrome\Application\chrome.exe"),
+                os.path.join(os.environ.get('PROGRAMFILES(X86)', ''), r"Google\Chrome\Application\chrome.exe")
+            ]
+            
+            for path in chrome_paths:
+                if os.path.exists(path):
+                    return path
+                    
+            # If no Chrome installation found
+            return None
+            
+        except Exception as e:
+            st.error(f"Error checking Chrome installation: {str(e)}")
+            return None
 
     def is_chrome_installed(self):
         """Check if Chrome is installed and get its version"""
@@ -83,12 +93,13 @@ class CrashGameMonitor:
             
             # Get Chrome browser path
             browser_path = self.get_browser_path()
-            if browser_path:
-                chrome_options.binary_location = browser_path
-                st.info(f"Using Chrome browser at: {browser_path}")
-            else:
-                st.error("Chrome browser not found. Please install Chrome.")
+            if not browser_path:
+                st.error("Chrome browser not found in common locations.")
+                st.info("Please make sure Google Chrome is installed on your system.")
                 return False
+                
+            st.info(f"Using Chrome browser at: {browser_path}")
+            chrome_options.binary_location = browser_path
             
             try:
                 from selenium.webdriver.chrome.service import Service
@@ -109,7 +120,6 @@ class CrashGameMonitor:
                 
         except Exception as e:
             st.error(f"Error during WebDriver setup: {str(e)}")
-            st.error("Please ensure Chrome browser is installed on your system")
             traceback.print_exc()
             return False
 
