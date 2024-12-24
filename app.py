@@ -18,6 +18,7 @@ import traceback
 import plotly.express as px
 import random
 import os
+import winreg
 
 class CrashGameMonitor:
     def __init__(self):
@@ -51,6 +52,35 @@ class CrashGameMonitor:
                 
         return None
 
+    def is_chrome_installed(self):
+        """Check if Chrome is installed and get its version"""
+        try:
+            # Common Chrome paths
+            chrome_paths = [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                os.path.join(os.environ.get('LOCALAPPDATA', ''), r"Google\Chrome\Application\chrome.exe"),
+            ]
+            
+            for path in chrome_paths:
+                if os.path.exists(path):
+                    st.info(f"Found Chrome at: {path}")
+                    # Try to get Chrome version
+                    try:
+                        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Google\Chrome\BLBeacon")
+                        version, _ = winreg.QueryValueEx(key, "version")
+                        st.info(f"Chrome version: {version}")
+                        return version
+                    except:
+                        # If we can't get version from registry, return True anyway since we found Chrome
+                        return "114.0.5735.90"  # Default to a stable version
+            
+            st.error("Chrome not found in standard locations")
+            return None
+        except Exception as e:
+            st.error(f"Error checking Chrome installation: {str(e)}")
+            return None
+
     def setup_driver(self):
         """Setup and return a configured Chrome driver"""
         try:
@@ -61,11 +91,21 @@ class CrashGameMonitor:
             self.retry_count += 1
             st.info(f"Attempting to initialize browser (attempt {self.retry_count}/{self.max_retries})...")
             
+            # Check Chrome installation first
+            chrome_version = self.is_chrome_installed()
+            if not chrome_version:
+                st.error("Please install Google Chrome first")
+                return None
+                
             try:
-                # First try to get ChromeDriver
-                st.info("Installing ChromeDriver...")
-                driver_manager = ChromeDriverManager()
-                driver_path = driver_manager.install()
+                # Use specific ChromeDriver version
+                st.info(f"Installing ChromeDriver for Chrome version {chrome_version}...")
+                driver_path = ChromeDriverManager(version=chrome_version).install()
+                
+                if not driver_path:
+                    st.error("Failed to get ChromeDriver path")
+                    return None
+                    
                 st.info(f"ChromeDriver installed at: {driver_path}")
                 
                 # Setup Chrome options
@@ -95,6 +135,7 @@ class CrashGameMonitor:
                 # Create service and driver
                 st.info("Creating Chrome WebDriver...")
                 service = Service(executable_path=driver_path)
+                
                 driver = webdriver.Chrome(service=service, options=chrome_options)
                 driver.set_page_load_timeout(30)
                 
