@@ -17,19 +17,28 @@ from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.core.os_manager import ChromeType
 import traceback
 import plotly.express as px
+import random
 
 class CrashGameMonitor:
     def __init__(self):
         self.driver = None
-        self.wait = None
         self.history = []
         self.analyzing = False
         self.last_multiplier = 0.0
         self.game_url = "https://1xbet.com/en/allgamesentrance/crash"
-        
+        self.retry_count = 0
+        self.max_retries = 3
+
     def setup_driver(self):
         """Setup and return a configured Chrome driver"""
         try:
+            if self.retry_count >= self.max_retries:
+                st.error("Maximum retry attempts reached. Please try again later.")
+                return None
+                
+            self.retry_count += 1
+            st.info(f"Attempting to initialize browser (attempt {self.retry_count}/{self.max_retries})...")
+            
             # Initialize ChromeDriverManager first
             chrome_driver_path = ChromeDriverManager().install()
             
@@ -41,20 +50,29 @@ class CrashGameMonitor:
             chrome_options.add_argument('--start-maximized')
             chrome_options.add_argument('--ignore-certificate-errors')
             chrome_options.add_argument('--ignore-ssl-errors')
+            chrome_options.add_argument('--disable-web-security')
+            chrome_options.add_argument('--allow-running-insecure-content')
             
             # Add user agent
-            user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            user_agents = [
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0'
+            ]
+            user_agent = random.choice(user_agents)
             chrome_options.add_argument(f'--user-agent={user_agent}')
             
             # Add experimental options
             chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
             chrome_options.add_experimental_option('useAutomationExtension', False)
             
-            # Create service
+            # Create service with increased timeout
             service = Service(chrome_driver_path)
+            service.start()
             
-            # Create driver
+            # Create driver with timeout
             driver = webdriver.Chrome(service=service, options=chrome_options)
+            driver.set_page_load_timeout(30)
             
             # Execute stealth scripts
             driver.execute_cdp_cmd('Network.setUserAgentOverride', {"userAgent": user_agent})
@@ -65,13 +83,19 @@ class CrashGameMonitor:
             Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
             Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
             Object.defineProperty(navigator, 'webdriver', {get: () => false});
+            Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
             """
             driver.execute_script(stealth_js)
             
+            self.retry_count = 0  # Reset counter on success
             return driver
             
         except Exception as e:
-            st.error(f"Error setting up browser: {str(e)}")
+            st.error(f"Error setting up browser (attempt {self.retry_count}/{self.max_retries}): {str(e)}")
+            if self.retry_count < self.max_retries:
+                st.info("Retrying...")
+                time.sleep(2)
+                return self.setup_driver()
             return None
 
     def load_game(self):
