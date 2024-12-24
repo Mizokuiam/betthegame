@@ -151,64 +151,57 @@ class CrashGameMonitor:
         st.sidebar.write(history_str)
 
 def main():
-    st.set_page_config(page_title="1xBet Crash Game Analyzer", layout="wide")
+    st.set_page_config(page_title="Crash Game Analyzer", layout="wide")
     
-    # Initialize session state
-    if 'monitor' not in st.session_state:
-        st.session_state.monitor = CrashGameMonitor()
-        st.session_state.analyzing = False
+    st.title("Crash Game Analyzer")
     
-    st.title("1xBet Crash Game Analyzer")
-    
-    # Create two columns
-    col1, col2 = st.columns([2, 1])
+    col1, col2 = st.columns(2)
     
     with col1:
-        # Embed 1xBet website
-        st.markdown("### 1xBet Website")
+        st.header("Instructions")
         st.markdown("""
-        1. Login to your 1xBet account
-        2. Navigate to the Crash game
-        3. Click 'Start Analysis' in the sidebar
+        1. Click the button below to open 1xBet Crash Game in a new tab
+        2. Log in to your account
+        3. Navigate to the Crash game
+        4. Return to this window and start the analysis
         """)
-        st.components.v1.iframe("https://1xbet.com", height=800, scrolling=True)
+        
+        st.link_button("Open 1xBet Crash Game", "https://1xbet.com/casino/games/provider/1xGames/crash")
+        
+        if st.button("Start Analysis"):
+            monitor = CrashGameMonitor()
+            monitor.setup_driver()
+            monitor.start_monitoring()
     
     with col2:
-        st.markdown("### Game Analysis")
-        if st.button("Start Analysis", disabled=st.session_state.analyzing):
-            st.session_state.analyzing = True
-            if not st.session_state.monitor.driver:
-                if st.session_state.monitor.setup_driver():
-                    st.success("Browser setup successful")
-                else:
-                    st.error("Failed to setup browser")
-                    st.session_state.analyzing = False
-                    return
+        st.header("Analysis")
         
-        if st.session_state.analyzing:
-            st.session_state.monitor.analyze_game()
+        # Placeholder for real-time stats
+        if 'history' not in st.session_state:
+            st.session_state.history = []
             
-            # Show analysis results
-            if st.session_state.monitor.history:
-                # Create line chart of multipliers
-                df = pd.DataFrame({
-                    'Round': range(len(st.session_state.monitor.history)),
-                    'Multiplier': st.session_state.monitor.history
-                })
-                
-                fig = px.line(df, x='Round', y='Multiplier', 
-                            title='Crash History',
-                            labels={'Multiplier': 'Crash Multiplier', 'Round': 'Game Round'})
-                fig.add_hline(y=2.0, line_dash="dash", line_color="red", 
-                            annotation_text="2x threshold")
-                st.plotly_chart(fig)
-        
-        if st.button("Stop Analysis", disabled=not st.session_state.analyzing):
-            st.session_state.analyzing = False
-            if st.session_state.monitor.driver:
-                st.session_state.monitor.driver.quit()
-                st.session_state.monitor.driver = None
-            st.success("Analysis stopped")
+        if len(st.session_state.history) > 0:
+            df = pd.DataFrame(st.session_state.history)
+            
+            # Display stats
+            col_stats1, col_stats2 = st.columns(2)
+            with col_stats1:
+                st.metric("Last Crash", f"{st.session_state.history[-1]:.2f}x")
+                st.metric("Average Multiplier", f"{df['multiplier'].mean():.2f}x")
+            with col_stats2:
+                st.metric("Max Multiplier", f"{df['multiplier'].max():.2f}x")
+                st.metric("Low Crash %", f"{(df['multiplier'] < 2).mean()*100:.1f}%")
+            
+            # Plot trend
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(y=df['multiplier'], mode='lines+markers', name='Crash Values'))
+            fig.add_hline(y=2, line_dash="dash", line_color="red", annotation_text="2x threshold")
+            fig.update_layout(title="Crash History", height=400)
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Show last 10 crashes
+            st.subheader("Last 10 Crashes")
+            st.write(" → ".join([f"{x:.2f}x" for x in df['multiplier'].tail(10)]))
 
 if __name__ == "__main__":
     main()
