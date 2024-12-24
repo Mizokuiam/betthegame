@@ -8,13 +8,10 @@ from datetime import datetime
 import time
 import threading
 import queue
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
+import undetected_chromedriver as uc
 import os
 import platform
 
@@ -74,33 +71,31 @@ st.markdown("""
 def initialize_driver():
     if st.session_state.driver is None:
         try:
-            chrome_options = Options()
-            chrome_options.add_argument('--headless=new')
-            chrome_options.add_argument('--no-sandbox')
-            chrome_options.add_argument('--disable-dev-shm-usage')
-            chrome_options.add_argument('--disable-gpu')
+            options = uc.ChromeOptions()
+            options.headless = True
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
             
             try:
-                service = Service(ChromeDriverManager().install())
-                driver = webdriver.Chrome(service=service, options=chrome_options)
-                
-                try:
-                    driver.get("https://1xbet.com/en/allgamesentrance/crash")
-                    st.session_state.driver = driver
-                    time.sleep(5)  # Allow page to load
-                    return driver
-                except Exception as e:
-                    st.error(f"Failed to load website: {str(e)}")
-                    driver.quit()
-                    return None
-                    
+                driver = uc.Chrome(options=options, version_main=131)  # Specify your Chrome version
+                driver.get("https://1xbet.com/en/allgamesentrance/crash")
+                st.session_state.driver = driver
+                time.sleep(5)  # Allow page to load
+                return driver
             except Exception as e:
-                st.error("Failed to initialize Chrome driver. Please make sure Chrome is installed and up to date.")
+                st.error(f"Failed to load website: {str(e)}")
+                if 'driver' in locals():
+                    driver.quit()
                 return None
                 
         except Exception as e:
             st.error(f"Failed to initialize Chrome driver: {str(e)}")
             return None
+
+def cleanup_driver():
+    if st.session_state.driver is not None:
+        st.session_state.driver.quit()
+        st.session_state.driver = None
 
 class CrashGamePredictor:
     def __init__(self):
@@ -115,7 +110,7 @@ class CrashGamePredictor:
                 driver = initialize_driver()
                 if driver is None:
                     return None
-        
+            
             # Wait for the crash point element to be visible
             try:
                 crash_element = WebDriverWait(driver, 10).until(
@@ -211,11 +206,6 @@ class CrashGamePredictor:
         st.session_state.model = self.model
         st.session_state.scaler = self.scaler
         return True
-
-def cleanup_driver():
-    if st.session_state.driver is not None:
-        st.session_state.driver.quit()
-        st.session_state.driver = None
 
 def update_data():
     predictor = CrashGamePredictor()
