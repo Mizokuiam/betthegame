@@ -111,16 +111,14 @@ class CrashGameMonitor:
             self.driver.get("https://1xbet.com/en/")
             time.sleep(3)  # Wait longer for page load
             
-            # Try multiple methods to find and click login button
+            # Try to find and click the login button in the header
             login_selectors = [
-                "a.login",
-                "button.login",
-                "div.login",
-                "//a[contains(@class, 'login')]",
-                "//button[contains(@class, 'login')]",
-                "//div[contains(@class, 'login')]",
-                "//a[contains(text(), 'Login')]",
-                "//button[contains(text(), 'Login')]"
+                ".header__auth [data-name='login']",  # Main login button in header
+                ".header__auth a:contains('LOG IN')",  # Text-based selector
+                "//div[contains(@class, 'header__auth')]//a[contains(text(), 'LOG IN')]",  # XPath for header login
+                "//a[contains(@class, 'login')]",  # Generic login class
+                "#loginButton",  # Possible ID
+                ".header-login-btn"  # Another possible class
             ]
 
             clicked = False
@@ -153,20 +151,15 @@ class CrashGameMonitor:
                 # Try direct JavaScript injection
                 st.sidebar.text("Trying JavaScript injection...")
                 js_show_login = """
-                    // Try to find and click any login-related element
                     function findAndClickLogin() {
-                        const possibleElements = [
-                            ...document.querySelectorAll('a, button, div'),
-                        ].filter(el => {
-                            const text = el.textContent.toLowerCase();
-                            const classes = el.className.toLowerCase();
-                            return text.includes('login') || text.includes('sign in') || 
-                                   classes.includes('login') || classes.includes('signin');
-                        });
-                        
-                        if (possibleElements.length > 0) {
-                            possibleElements[0].click();
-                            return true;
+                        // Try to find the login button in the header
+                        const headerButtons = document.querySelectorAll('.header__auth a, .header-login-btn, [data-name="login"]');
+                        for (const button of headerButtons) {
+                            if (button.textContent.toLowerCase().includes('log in') || 
+                                button.getAttribute('data-name') === 'login') {
+                                button.click();
+                                return true;
+                            }
                         }
                         return false;
                     }
@@ -180,37 +173,27 @@ class CrashGameMonitor:
 
             time.sleep(2)  # Wait for login form
 
-            # Try to fill login form using JavaScript
+            # Try to fill login form using JavaScript based on the actual form structure
             js_fill_login = f"""
                 function fillLogin() {{
-                    // Try different input selectors
-                    const inputs = document.querySelectorAll('input');
-                    let loginInput, passwordInput;
-                    
-                    for (const input of inputs) {{
-                        if (input.type === 'text' || input.type === 'email' || 
-                            input.name === 'login' || input.id.includes('login')) {{
-                            loginInput = input;
-                        }}
-                        if (input.type === 'password' || input.name === 'password' || 
-                            input.id.includes('password')) {{
-                            passwordInput = input;
-                        }}
-                    }}
+                    // Find login form inputs
+                    const loginInput = document.querySelector('input[placeholder="ID or Email"]') ||
+                                     document.querySelector('input[type="text"]');
+                    const passwordInput = document.querySelector('input[type="password"]');
                     
                     if (loginInput && passwordInput) {{
+                        // Fill in credentials
                         loginInput.value = '{username}';
                         passwordInput.value = '{password}';
                         
-                        // Try to find and click submit button
-                        const submitButton = document.querySelector('button[type="submit"]') ||
-                                          document.querySelector('input[type="submit"]') ||
-                                          [...document.querySelectorAll('button')].find(b => 
-                                              b.textContent.toLowerCase().includes('login') || 
-                                              b.textContent.toLowerCase().includes('sign in'));
+                        // Find and click the green login button
+                        const loginButton = document.querySelector('.green-button') ||
+                                          document.querySelector('button.login-button') ||
+                                          Array.from(document.querySelectorAll('button')).find(b => 
+                                              b.textContent.trim().toLowerCase() === 'log in');
                         
-                        if (submitButton) {{
-                            submitButton.click();
+                        if (loginButton) {{
+                            loginButton.click();
                             return true;
                         }}
                     }}
@@ -226,12 +209,12 @@ class CrashGameMonitor:
 
             time.sleep(3)  # Wait for login to complete
 
-            # Verify login success by checking balance
+            # Verify login success by checking balance with updated selectors
             try:
                 balance_selectors = [
                     ".header-balance-sum",
-                    ".balance",
-                    "//div[contains(@class, 'balance')]",
+                    ".main-balance",
+                    "//div[contains(@class, 'header-balance')]//span",
                     "//div[contains(text(), 'MAD')]"
                 ]
                 
