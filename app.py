@@ -101,7 +101,7 @@ class CrashGameMonitor:
             return False
 
     def monitor_game_state(self):
-        """Monitor current game state and multiplier"""
+        """Monitor current game state and multiplier using JavaScript execution"""
         try:
             if not self.driver:
                 st.error("Browser not initialized!")
@@ -112,38 +112,75 @@ class CrashGameMonitor:
             if "1xbet.com" not in current_url:
                 st.info("Navigating to 1xBet...")
                 self.driver.get("https://1xbet.com/en/allgamesentrance/crash")
-                time.sleep(2)  # Wait for page load
+                time.sleep(3)  # Wait longer for page load
 
             # Debug info
             st.sidebar.text("Current URL: " + self.driver.current_url)
             
-            # Check game state
+            # Inject JavaScript to bypass potential bot detection
+            self.driver.execute_script("""
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+            """)
+
+            # Try to get game state using JavaScript
             try:
-                st.sidebar.text("Looking for crash-wrapper element...")
-                state_elem = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".crash-wrapper")))
-                class_attr = state_elem.get_attribute("class")
-                st.sidebar.text(f"Element classes: {class_attr}")
-                
-                if "preparing" in class_attr:
-                    self.game_state = "preparing"
-                elif "flying" in class_attr:
-                    self.game_state = "flying"
-                else:
-                    self.game_state = "crashed"
+                game_state_js = """
+                    let wrapper = document.querySelector('.crash-wrapper');
+                    if (!wrapper) return 'unknown';
+                    if (wrapper.classList.contains('preparing')) return 'preparing';
+                    if (wrapper.classList.contains('flying')) return 'flying';
+                    if (wrapper.classList.contains('crashed')) return 'crashed';
+                    return document.querySelector('.game-state')?.textContent || 'unknown';
+                """
+                self.game_state = self.driver.execute_script(game_state_js)
+                st.sidebar.text(f"Game state from JS: {self.game_state}")
             except Exception as e:
-                st.sidebar.error(f"Error finding game state: {str(e)}")
+                st.sidebar.error(f"Error getting game state via JS: {str(e)}")
                 self.game_state = "unknown"
 
-            # Get current multiplier
+            # Try to get multiplier using JavaScript
             try:
-                st.sidebar.text("Looking for multiplier element...")
-                multiplier_elem = self.driver.find_element(By.CSS_SELECTOR, ".multiplier")
-                multiplier_text = multiplier_elem.text.strip().replace('×', '')
-                st.sidebar.text(f"Found multiplier text: {multiplier_text}")
-                self.current_multiplier = float(multiplier_text)
+                multiplier_js = """
+                    let multiplier = document.querySelector('.multiplier');
+                    if (!multiplier) return null;
+                    let value = multiplier.textContent.replace('×', '').trim();
+                    return value ? parseFloat(value) : null;
+                """
+                self.current_multiplier = self.driver.execute_script(multiplier_js)
+                st.sidebar.text(f"Multiplier from JS: {self.current_multiplier}")
             except Exception as e:
-                st.sidebar.error(f"Error finding multiplier: {str(e)}")
+                st.sidebar.error(f"Error getting multiplier via JS: {str(e)}")
                 self.current_multiplier = None
+
+            # Try alternative method using network requests
+            try:
+                cookies = self.driver.get_cookies()
+                cookie_dict = {cookie['name']: cookie['value'] for cookie in cookies}
+                
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'application/json',
+                    'Referer': 'https://1xbet.com/en/allgamesentrance/crash'
+                }
+                
+                st.sidebar.text("Attempting to get game state via API...")
+                # Note: You might need to find the actual API endpoint
+                response = self.driver.execute_script("""
+                    return fetch('/crash/state').then(r => r.json());
+                """)
+                
+                if response:
+                    st.sidebar.text(f"API Response: {response}")
+                    # Update state based on API response if available
+                    if 'state' in response:
+                        self.game_state = response['state']
+                    if 'multiplier' in response:
+                        self.current_multiplier = float(response['multiplier'])
+
+            except Exception as e:
+                st.sidebar.error(f"Error with API request: {str(e)}")
 
             # Record crash value
             if self.game_state == "crashed" and self.current_multiplier:
@@ -153,9 +190,19 @@ class CrashGameMonitor:
                 })
                 self.save_history()
 
+            # Take screenshot for debugging
+            try:
+                screenshot = self.driver.get_screenshot_as_base64()
+                st.sidebar.image(screenshot, caption="Current page state", use_column_width=True)
+            except Exception as e:
+                st.sidebar.error(f"Failed to take screenshot: {str(e)}")
+
             return self.game_state, self.current_multiplier
         except Exception as e:
             st.error(f"Error monitoring game state: {str(e)}")
+            if hasattr(e, '__traceback__'):
+                import traceback
+                st.sidebar.error(f"Traceback: {traceback.format_exc()}")
             return "error", None
 
     def analyze_patterns(self):
