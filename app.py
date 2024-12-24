@@ -135,7 +135,31 @@ def initialize_driver():
             chrome_options.add_experimental_option('useAutomationExtension', False)
             
             try:
-                service = Service(ChromeDriverManager().install())
+                # Use ChromeDriverManager with specific Chrome version detection
+                chrome_version = None
+                if platform.system() == 'Windows':
+                    import winreg
+                    try:
+                        # Try to get Chrome version from registry
+                        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Google\Chrome\BLBeacon")
+                        chrome_version = winreg.QueryValueEx(key, "version")[0]
+                        winreg.CloseKey(key)
+                    except WindowsError:
+                        try:
+                            # Alternative registry path
+                            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Google Chrome")
+                            chrome_version = winreg.QueryValueEx(key, "Version")[0]
+                            winreg.CloseKey(key)
+                        except WindowsError:
+                            st.error("Chrome version not found in registry. Please ensure Chrome is installed.")
+                            return None
+
+                # Install ChromeDriver with specific version if found
+                if chrome_version:
+                    service = Service(ChromeDriverManager(version=chrome_version).install())
+                else:
+                    service = Service(ChromeDriverManager().install())
+
                 driver = webdriver.Chrome(service=service, options=chrome_options)
                 
                 # Add stealth mode JavaScript
