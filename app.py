@@ -15,6 +15,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
+import os
 
 # Page configuration
 st.set_page_config(
@@ -76,11 +77,21 @@ def initialize_driver():
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
         
-        service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-        driver.get("https://1xbet.com/en/allgamesentrance/crash")
-        st.session_state.driver = driver
-        time.sleep(5)  # Allow page to load
+        # Add Windows-specific Chrome paths
+        chrome_options.binary_location = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+        if not os.path.exists(chrome_options.binary_location):
+            chrome_options.binary_location = "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
+        
+        try:
+            service = Service(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+            driver.get("https://1xbet.com/en/allgamesentrance/crash")
+            st.session_state.driver = driver
+            time.sleep(5)  # Allow page to load
+        except Exception as e:
+            st.error(f"Failed to initialize Chrome driver: {str(e)}")
+            st.error("Please make sure Google Chrome is installed on your system.")
+            return None
 
 def cleanup_driver():
     if st.session_state.driver is not None:
@@ -225,7 +236,7 @@ def main():
             st.session_state.auto_update = auto_update
             if not auto_update:
                 cleanup_driver()
-            st.experimental_rerun()
+            st.rerun()
     
     # Main content area
     col1, col2 = st.columns([2, 1])
@@ -279,7 +290,7 @@ def main():
     if st.session_state.auto_update:
         update_data()
         time.sleep(update_interval)
-        st.experimental_rerun()
+        st.rerun()
 
 if __name__ == "__main__":
     main()
