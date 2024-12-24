@@ -40,26 +40,57 @@ if 'auto_update' not in st.session_state:
 if 'driver' not in st.session_state:
     st.session_state.driver = None
 
-# Custom CSS
+# Custom CSS with light/dark mode support
 st.markdown("""
     <style>
-    .stApp {
-        background-color: #1E1E1E;
-        color: white;
+    /* Light mode styles */
+    [data-theme="light"] .stApp {
+        background-color: #ffffff;
+        color: #1E1E1E;
     }
-    .stButton>button {
+    [data-theme="light"] .stButton>button {
         background-color: #4CAF50;
         color: white;
         border-radius: 5px;
         width: 100%;
     }
-    .prediction-box {
+    [data-theme="light"] .prediction-box {
+        padding: 20px;
+        border-radius: 10px;
+        background-color: #f5f5f5;
+        margin: 10px 0;
+        border: 1px solid #ddd;
+    }
+    [data-theme="light"] .latest-crash {
+        font-size: 24px;
+        font-weight: bold;
+        padding: 15px;
+        border-radius: 10px;
+        background-color: #f5f5f5;
+        margin: 10px 0;
+        text-align: center;
+        border: 1px solid #ddd;
+    }
+    
+    /* Dark mode styles */
+    [data-theme="dark"] .stApp {
+        background-color: #1E1E1E;
+        color: white;
+    }
+    [data-theme="dark"] .stButton>button {
+        background-color: #4CAF50;
+        color: white;
+        border-radius: 5px;
+        width: 100%;
+    }
+    [data-theme="dark"] .prediction-box {
         padding: 20px;
         border-radius: 10px;
         background-color: #2E2E2E;
         margin: 10px 0;
+        border: 1px solid #444;
     }
-    .latest-crash {
+    [data-theme="dark"] .latest-crash {
         font-size: 24px;
         font-weight: bold;
         padding: 15px;
@@ -67,6 +98,26 @@ st.markdown("""
         background-color: #2E2E2E;
         margin: 10px 0;
         text-align: center;
+        border: 1px solid #444;
+    }
+    
+    /* Common styles */
+    .stButton>button:hover {
+        background-color: #45a049;
+    }
+    .crash-value {
+        font-size: 2em;
+        font-weight: bold;
+    }
+    .confidence {
+        color: var(--text-color);
+        font-size: 1.1em;
+    }
+    .recommended-bet {
+        margin-top: 10px;
+        padding: 10px;
+        border-radius: 5px;
+        background-color: rgba(76, 175, 80, 0.1);
     }
     </style>
     """, unsafe_allow_html=True)
@@ -86,11 +137,29 @@ def initialize_driver():
             try:
                 service = Service(ChromeDriverManager().install())
                 driver = webdriver.Chrome(service=service, options=chrome_options)
+                
+                # Add stealth mode JavaScript
                 driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                driver.execute_script("window.chrome = { runtime: {} };")
+                
+                # Set a proper user agent
+                driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+                    "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                })
+                
+                # Try to load the website
                 driver.get("https://1xbet.com/en/allgamesentrance/crash")
-                st.session_state.driver = driver
                 time.sleep(5)  # Allow page to load
-                return driver
+                
+                # Verify the page loaded correctly
+                if "crash" in driver.current_url.lower():
+                    st.session_state.driver = driver
+                    return driver
+                else:
+                    st.error("Failed to load the crash game page. Please try again.")
+                    driver.quit()
+                    return None
+                    
             except Exception as e:
                 st.error(f"Failed to load website: {str(e)}")
                 if 'driver' in locals():
@@ -100,11 +169,7 @@ def initialize_driver():
         except Exception as e:
             st.error(f"Failed to initialize Chrome driver: {str(e)}")
             return None
-
-def cleanup_driver():
-    if st.session_state.driver is not None:
-        st.session_state.driver.quit()
-        st.session_state.driver = None
+    return st.session_state.driver
 
 class CrashGamePredictor:
     def __init__(self):
@@ -216,6 +281,11 @@ class CrashGamePredictor:
         st.session_state.scaler = self.scaler
         return True
 
+def cleanup_driver():
+    if st.session_state.driver is not None:
+        st.session_state.driver.quit()
+        st.session_state.driver = None
+
 def update_data():
     predictor = CrashGamePredictor()
     latest_data = predictor.scrape_latest_game()
@@ -263,8 +333,8 @@ def main():
             latest_crash = st.session_state.historical_data['crash_point'].iloc[-1]
             crash_color = "#4CAF50" if latest_crash >= 2.0 else "#ff4444"
             st.markdown(f"""
-                <div class='latest-crash' style='border: 2px solid {crash_color}'>
-                    Latest Crash Point: <span style='color: {crash_color}'>{latest_crash:.2f}x</span>
+                <div class='latest-crash'>
+                    Latest Crash Point: <span class='crash-value' style='color: {crash_color}'>{latest_crash:.2f}x</span>
                 </div>
             """, unsafe_allow_html=True)
         
@@ -294,11 +364,12 @@ def main():
         st.markdown(f"""
             <div class='prediction-box'>
                 <h3>Predicted Crash Point</h3>
-                <h2 style='color: #4CAF50'>{pred['crash_point']:.2f}x</h2>
-                <p>Confidence: {pred['confidence']:.1f}%</p>
-                <hr style='margin: 10px 0; border-color: #444;'>
-                <p style='font-weight: bold; color: #4CAF50'>Recommended Bet: {recommended_bet:.2f}x</p>
-                <p style='font-size: 0.8em; color: #888;'>Based on pattern analysis and risk assessment</p>
+                <div class='crash-value' style='color: #4CAF50'>{pred['crash_point']:.2f}x</div>
+                <div class='confidence'>Confidence: {pred['confidence']:.1f}%</div>
+                <div class='recommended-bet'>
+                    <strong style='color: #4CAF50'>Recommended Bet: {recommended_bet:.2f}x</strong>
+                    <p style='font-size: 0.8em; opacity: 0.8;'>Based on pattern analysis and risk assessment</p>
+                </div>
             </div>
             """, unsafe_allow_html=True)
     
