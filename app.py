@@ -93,6 +93,8 @@ class CrashGameMonitor:
                 chrome_options.add_argument('--ignore-ssl-errors')
                 chrome_options.add_argument('--disable-web-security')
                 chrome_options.add_argument('--allow-running-insecure-content')
+                chrome_options.add_argument('--headless=new')  # Use new headless mode
+                chrome_options.add_argument('--disable-gpu')   # Disable GPU hardware acceleration
                 
                 # Add user agent
                 user_agents = [
@@ -107,9 +109,12 @@ class CrashGameMonitor:
                 chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
                 chrome_options.add_experimental_option('useAutomationExtension', False)
                 
-                # Let ChromeDriver handle version detection
+                # Create service with specific ChromeDriver version
                 st.info("Setting up ChromeDriver...")
-                driver = webdriver.Chrome(options=chrome_options)
+                service = Service(ChromeDriverManager(version="120.0.6099.109").install())
+                
+                # Initialize the driver with service and options
+                driver = webdriver.Chrome(service=service, options=chrome_options)
                 driver.set_page_load_timeout(30)
                 
                 # Execute stealth scripts
@@ -130,12 +135,19 @@ class CrashGameMonitor:
                 return driver
                 
             except Exception as e:
+                error_msg = str(e).lower()
                 st.error(f"Error during WebDriver setup: {str(e)}")
-                if "chrome not reachable" in str(e).lower():
+                
+                if "chrome not reachable" in error_msg:
                     st.error("Chrome browser not responding. Please check if Chrome is running properly.")
-                elif "session not created" in str(e).lower():
-                    st.error("Failed to create browser session. Please check Chrome version compatibility.")
-                elif "chromedriver" in str(e).lower():
+                elif "session not created" in error_msg:
+                    if "devtoolsactiveport file doesn't exist" in error_msg:
+                        st.error("Failed to start Chrome in headless mode. Trying with different options...")
+                        # Try with different options on next retry
+                        chrome_options.add_argument('--remote-debugging-port=9222')
+                    else:
+                        st.error("Failed to create browser session. Please check Chrome version compatibility.")
+                elif "chromedriver" in error_msg:
                     st.error("ChromeDriver error. Please ensure Chrome is properly installed.")
                 
                 if self.retry_count < self.max_retries:
