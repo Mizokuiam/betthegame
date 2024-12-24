@@ -16,7 +16,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 import os
-import winreg
+import platform
 
 # Page configuration
 st.set_page_config(
@@ -71,20 +71,6 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-def get_chrome_path():
-    """Get Chrome path from Windows Registry"""
-    try:
-        # Try to get path from Registry
-        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe") as key:
-            return winreg.QueryValue(key, None)
-    except WindowsError:
-        try:
-            # Try current user if not found in HKLM
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe") as key:
-                return winreg.QueryValue(key, None)
-        except WindowsError:
-            return None
-
 def initialize_driver():
     if st.session_state.driver is None:
         try:
@@ -94,36 +80,27 @@ def initialize_driver():
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--disable-gpu')
             
-            # Get Chrome path from Registry
-            chrome_path = get_chrome_path()
-            if chrome_path and os.path.exists(chrome_path):
-                chrome_options.binary_location = chrome_path
-            else:
-                st.error("Could not detect Chrome installation. Please make sure Chrome is properly installed.")
-                return None
-            
-            service = Service(ChromeDriverManager(version="latest").install())
-            driver = webdriver.Chrome(service=service, options=chrome_options)
-            
             try:
-                driver.get("https://1xbet.com/en/allgamesentrance/crash")
-                st.session_state.driver = driver
-                time.sleep(5)  # Allow page to load
-                return driver
+                service = Service(ChromeDriverManager().install())
+                driver = webdriver.Chrome(service=service, options=chrome_options)
+                
+                try:
+                    driver.get("https://1xbet.com/en/allgamesentrance/crash")
+                    st.session_state.driver = driver
+                    time.sleep(5)  # Allow page to load
+                    return driver
+                except Exception as e:
+                    st.error(f"Failed to load website: {str(e)}")
+                    driver.quit()
+                    return None
+                    
             except Exception as e:
-                st.error(f"Failed to load website: {str(e)}")
-                driver.quit()
+                st.error("Failed to initialize Chrome driver. Please make sure Chrome is installed and up to date.")
                 return None
                 
         except Exception as e:
             st.error(f"Failed to initialize Chrome driver: {str(e)}")
-            st.error("Please make sure Chrome is installed and up to date.")
             return None
-
-def cleanup_driver():
-    if st.session_state.driver is not None:
-        st.session_state.driver.quit()
-        st.session_state.driver = None
 
 class CrashGamePredictor:
     def __init__(self):
@@ -234,6 +211,11 @@ class CrashGamePredictor:
         st.session_state.model = self.model
         st.session_state.scaler = self.scaler
         return True
+
+def cleanup_driver():
+    if st.session_state.driver is not None:
+        st.session_state.driver.quit()
+        st.session_state.driver = None
 
 def update_data():
     predictor = CrashGamePredictor()
