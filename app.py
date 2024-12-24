@@ -112,6 +112,8 @@ class CrashGameMonitor:
             self.driver.get("https://1xbet.com/en/login/")
             time.sleep(5)  # Wait longer for page load
             
+            st.sidebar.text("Current URL: " + self.driver.current_url)
+            
             # Try multiple approaches to fill the form
             login_attempts = 0
             max_attempts = 3
@@ -119,6 +121,7 @@ class CrashGameMonitor:
             while login_attempts < max_attempts:
                 try:
                     # First try: Direct JavaScript injection
+                    st.sidebar.text("Attempt " + str(login_attempts + 1) + ": Using JavaScript")
                     js_code = f"""
                         function fillForm() {{
                             // Get all input fields
@@ -170,64 +173,103 @@ class CrashGameMonitor:
                     
                     form_filled = self.driver.execute_script(js_code)
                     if form_filled:
+                        st.sidebar.text("JavaScript form fill successful")
+                        time.sleep(3)
                         break
+                    else:
+                        st.sidebar.text("JavaScript form fill failed, trying Selenium")
                     
                     # Second try: Selenium with explicit waits
                     # Find username field
                     username_elements = self.driver.find_elements(By.TAG_NAME, "input")
+                    username_filled = False
                     for elem in username_elements:
                         try:
                             elem_type = elem.get_attribute("type")
-                            if elem_type in ["text", "email"]:
+                            elem_placeholder = elem.get_attribute("placeholder")
+                            st.sidebar.text(f"Found input: type={elem_type}, placeholder={elem_placeholder}")
+                            if elem_type in ["text", "email"] or (elem_placeholder and ("id" in elem_placeholder.lower() or "email" in elem_placeholder.lower())):
                                 elem.clear()
                                 elem.send_keys(username)
+                                username_filled = True
+                                st.sidebar.text("Username filled")
                                 break
-                        except:
+                        except Exception as e:
+                            st.sidebar.text(f"Error with input: {str(e)}")
                             continue
+                    
+                    if not username_filled:
+                        st.sidebar.warning("Could not find username field")
+                        login_attempts += 1
+                        continue
                     
                     # Find password field
                     password_elements = self.driver.find_elements(By.CSS_SELECTOR, "input[type='password']")
                     if password_elements:
                         password_elements[0].clear()
                         password_elements[0].send_keys(password)
+                        st.sidebar.text("Password filled")
+                    else:
+                        st.sidebar.warning("Could not find password field")
+                        login_attempts += 1
+                        continue
                     
                     # Find submit button
+                    submit_clicked = False
                     submit_buttons = self.driver.find_elements(By.TAG_NAME, "button")
                     for button in submit_buttons:
                         try:
-                            if button.get_attribute("type") == "submit" or \
-                               "auth-button" in button.get_attribute("class") or \
-                               "login-button" in button.get_attribute("class"):
+                            button_type = button.get_attribute("type")
+                            button_class = button.get_attribute("class")
+                            st.sidebar.text(f"Found button: type={button_type}, class={button_class}")
+                            if button_type == "submit" or \
+                               (button_class and ("auth-button" in button_class or "login-button" in button_class)):
                                 button.click()
+                                submit_clicked = True
+                                st.sidebar.text("Submit button clicked")
                                 break
-                        except:
+                        except Exception as e:
+                            st.sidebar.text(f"Error with button: {str(e)}")
                             continue
+                    
+                    if not submit_clicked:
+                        st.sidebar.warning("Could not find submit button")
+                        login_attempts += 1
+                        continue
                     
                     break
                     
                 except Exception as e:
                     login_attempts += 1
-                    st.sidebar.warning(f"Login attempt {login_attempts} failed, retrying...")
+                    st.sidebar.warning(f"Login attempt {login_attempts} failed: {str(e)}")
                     time.sleep(2)
                     continue
             
             # Wait for login to complete
             time.sleep(5)
             
+            # Get current URL for debugging
+            st.sidebar.text("Post-login URL: " + self.driver.current_url)
+            
             # Verify login success
             try:
                 # Try multiple methods to verify login
                 verification_methods = [
-                    lambda: self.driver.find_element(By.CSS_SELECTOR, ".header-balance-sum"),
-                    lambda: self.driver.find_element(By.CSS_SELECTOR, ".main-balance"),
-                    lambda: self.driver.find_element(By.CSS_SELECTOR, ".balance-value"),
-                    lambda: self.driver.find_element(By.XPATH, "//div[contains(text(), 'MAD')]"),
+                    (By.CSS_SELECTOR, ".header-balance-sum"),
+                    (By.CSS_SELECTOR, ".main-balance"),
+                    (By.CSS_SELECTOR, ".balance-value"),
+                    (By.XPATH, "//div[contains(@class, 'header-balance')]//span"),
+                    (By.XPATH, "//div[contains(text(), 'MAD')]"),
+                    (By.CSS_SELECTOR, "#balance"),
                 ]
                 
-                for method in verification_methods:
+                for method_type, selector in verification_methods:
                     try:
-                        balance_elem = method()
+                        st.sidebar.text(f"Trying to find balance with: {selector}")
+                        balance_elem = self.driver.find_element(method_type, selector)
                         balance_text = balance_elem.text.strip()
+                        st.sidebar.text(f"Found element text: {balance_text}")
+                        
                         if 'MAD' in balance_text:
                             self.balance = float(balance_text.replace('MAD', '').strip())
                             st.sidebar.success(f"Logged in successfully! Balance: {self.balance} MAD")
@@ -237,8 +279,21 @@ class CrashGameMonitor:
                             self.driver.get("https://1xbet.com/en/allgamesentrance/crash")
                             time.sleep(2)
                             return True
-                    except:
+                    except Exception as e:
+                        st.sidebar.text(f"Verification method failed: {str(e)}")
                         continue
+                
+                # If we get here, try to check if we're on a logged-in page
+                try:
+                    profile_elements = self.driver.find_elements(By.CSS_SELECTOR, ".profile, .account, .user-info")
+                    if profile_elements:
+                        st.sidebar.success("Found profile element, assuming login successful")
+                        self.logged_in = True
+                        self.driver.get("https://1xbet.com/en/allgamesentrance/crash")
+                        time.sleep(2)
+                        return True
+                except Exception as e:
+                    st.sidebar.text(f"Profile check failed: {str(e)}")
                 
                 st.sidebar.error("Could not verify login success")
                 return False
