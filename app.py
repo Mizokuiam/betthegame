@@ -114,12 +114,109 @@ class CrashGameMonitor:
             
             st.sidebar.text("Current URL: " + self.driver.current_url)
             
+            # Debug page source
+            page_source = self.driver.page_source
+            st.sidebar.text("Page source length: " + str(len(page_source)))
+            st.sidebar.text("Looking for iframes...")
+            
+            # Check for iframes
+            iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
+            for idx, iframe in enumerate(iframes):
+                try:
+                    iframe_id = iframe.get_attribute("id")
+                    iframe_name = iframe.get_attribute("name")
+                    iframe_src = iframe.get_attribute("src")
+                    st.sidebar.text(f"Found iframe {idx}: id={iframe_id}, name={iframe_name}, src={iframe_src}")
+                    
+                    # Switch to iframe and look for login form
+                    self.driver.switch_to.frame(iframe)
+                    
+                    # Try to find login elements in iframe
+                    inputs = self.driver.find_elements(By.TAG_NAME, "input")
+                    for input_elem in inputs:
+                        input_type = input_elem.get_attribute("type")
+                        input_name = input_elem.get_attribute("name")
+                        input_id = input_elem.get_attribute("id")
+                        st.sidebar.text(f"Input in iframe: type={input_type}, name={input_name}, id={input_id}")
+                    
+                    # Switch back to default content
+                    self.driver.switch_to.default_content()
+                except Exception as e:
+                    st.sidebar.text(f"Error with iframe {idx}: {str(e)}")
+                    self.driver.switch_to.default_content()
+                    continue
+            
             # Try multiple approaches to fill the form
             login_attempts = 0
             max_attempts = 3
             
             while login_attempts < max_attempts:
                 try:
+                    # First try: Check page state
+                    st.sidebar.text(f"Attempt {login_attempts + 1}: Checking page state")
+                    
+                    # List all input elements
+                    all_inputs = self.driver.find_elements(By.TAG_NAME, "input")
+                    st.sidebar.text(f"Found {len(all_inputs)} input elements")
+                    for input_elem in all_inputs:
+                        try:
+                            input_type = input_elem.get_attribute("type")
+                            input_name = input_elem.get_attribute("name")
+                            input_id = input_elem.get_attribute("id")
+                            input_class = input_elem.get_attribute("class")
+                            st.sidebar.text(f"Input: type={input_type}, name={input_name}, id={input_id}, class={input_class}")
+                        except:
+                            continue
+                    
+                    # List all buttons
+                    all_buttons = self.driver.find_elements(By.TAG_NAME, "button")
+                    st.sidebar.text(f"Found {len(all_buttons)} button elements")
+                    for button in all_buttons:
+                        try:
+                            button_type = button.get_attribute("type")
+                            button_class = button.get_attribute("class")
+                            button_id = button.get_attribute("id")
+                            st.sidebar.text(f"Button: type={button_type}, class={button_class}, id={button_id}")
+                        except:
+                            continue
+                    
+                    # Try to find login form
+                    forms = self.driver.find_elements(By.TAG_NAME, "form")
+                    st.sidebar.text(f"Found {len(forms)} form elements")
+                    for form in forms:
+                        try:
+                            form_id = form.get_attribute("id")
+                            form_class = form.get_attribute("class")
+                            st.sidebar.text(f"Form: id={form_id}, class={form_class}")
+                        except:
+                            continue
+                    
+                    # Try JavaScript injection with more debugging
+                    js_code = """
+                        function getFormInfo() {
+                            const forms = document.getElementsByTagName('form');
+                            const inputs = document.getElementsByTagName('input');
+                            const buttons = document.getElementsByTagName('button');
+                            return {
+                                forms: forms.length,
+                                inputs: inputs.length,
+                                buttons: buttons.length,
+                                html: document.documentElement.outerHTML
+                            };
+                        }
+                        return getFormInfo();
+                    """
+                    page_info = self.driver.execute_script(js_code)
+                    st.sidebar.text(f"JS found: {page_info['forms']} forms, {page_info['inputs']} inputs, {page_info['buttons']} buttons")
+                    
+                    # If we found no form elements, try refreshing the page
+                    if page_info['forms'] == 0 and page_info['inputs'] == 0:
+                        st.sidebar.text("No form elements found, refreshing page...")
+                        self.driver.refresh()
+                        time.sleep(5)
+                        login_attempts += 1
+                        continue
+                    
                     # First try: Direct JavaScript injection
                     st.sidebar.text("Attempt " + str(login_attempts + 1) + ": Using JavaScript")
                     js_code = f"""
