@@ -72,104 +72,43 @@ class CrashGameMonitor:
             st.error(f"Error checking Chrome installation: {str(e)}")
             return None
 
-    def setup_driver(self):
-        """Setup and return a configured Chrome driver"""
+    def initialize_browser(self):
+        """Initialize the Chrome browser with specific options"""
         try:
-            if self.retry_count >= self.max_retries:
-                st.error("Maximum retry attempts reached. Please try again later.")
-                return None
-                
-            self.retry_count += 1
-            st.info(f"Attempting to initialize browser (attempt {self.retry_count}/{self.max_retries})...")
+            chrome_options = Options()
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--headless')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument('--disable-gpu')
+            
+            # Get Chrome browser path
+            browser_path = self.get_browser_path()
+            if browser_path:
+                chrome_options.binary_location = browser_path
             
             try:
-                # Setup Chrome options first
-                chrome_options = Options()
-                chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-                chrome_options.add_argument('--disable-dev-shm-usage')
-                chrome_options.add_argument('--no-sandbox')
-                chrome_options.add_argument('--start-maximized')
-                chrome_options.add_argument('--ignore-certificate-errors')
-                chrome_options.add_argument('--ignore-ssl-errors')
-                chrome_options.add_argument('--disable-web-security')
-                chrome_options.add_argument('--allow-running-insecure-content')
-                chrome_options.add_argument('--headless=new')  # Use new headless mode
-                chrome_options.add_argument('--disable-gpu')   # Disable GPU hardware acceleration
-                
-                # Add user agent
-                user_agents = [
-                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0'
-                ]
-                user_agent = random.choice(user_agents)
-                chrome_options.add_argument(f'--user-agent={user_agent}')
-                
-                # Add experimental options
-                chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-                chrome_options.add_experimental_option('useAutomationExtension', False)
-                
-                # Create service with specific ChromeDriver version
-                st.info("Setting up ChromeDriver...")
+                # Try using webdriver_manager
                 service = Service(ChromeDriverManager().install())
-                
-                # Initialize the driver with service and options
-                driver = webdriver.Chrome(service=service, options=chrome_options)
-                driver.set_page_load_timeout(30)
-                
-                # Execute stealth scripts
-                driver.execute_cdp_cmd('Network.setUserAgentOverride', {"userAgent": user_agent})
-                driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-                
-                # Add stealth JS
-                stealth_js = """
-                Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
-                Object.defineProperty(navigator, 'webdriver', {get: () => false});
-                Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
-                """
-                driver.execute_script(stealth_js)
-                
-                st.success("Chrome WebDriver initialized successfully!")
-                self.retry_count = 0  # Reset counter on success
-                return driver
-                
             except Exception as e:
-                error_msg = str(e).lower()
-                st.error(f"Error during WebDriver setup: {str(e)}")
-                
-                if "chrome not reachable" in error_msg:
-                    st.error("Chrome browser not responding. Please check if Chrome is running properly.")
-                elif "session not created" in error_msg:
-                    if "devtoolsactiveport file doesn't exist" in error_msg:
-                        st.error("Failed to start Chrome in headless mode. Trying with different options...")
-                        # Try with different options on next retry
-                        chrome_options.add_argument('--remote-debugging-port=9222')
-                    else:
-                        st.error("Failed to create browser session. Please check Chrome version compatibility.")
-                elif "chromedriver" in error_msg:
-                    st.error("ChromeDriver error. Please ensure Chrome is properly installed.")
-                
-                if self.retry_count < self.max_retries:
-                    st.info("Retrying browser initialization...")
-                    time.sleep(2)
-                    return self.setup_driver()
-                return None
-                
+                st.warning(f"Could not use webdriver_manager: {str(e)}")
+                # Fallback to local ChromeDriver if available
+                service = Service("chromedriver.exe")
+            
+            self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            st.success("Browser initialized successfully")
+            return True
+            
         except Exception as e:
-            st.error(f"Error setting up browser (attempt {self.retry_count}/{self.max_retries}): {str(e)}")
-            if self.retry_count < self.max_retries:
-                st.info("Retrying...")
-                time.sleep(2)
-                return self.setup_driver()
-            return None
+            st.error(f"Error during WebDriver setup: {str(e)}")
+            st.error("Please ensure Chrome browser is installed on your system")
+            traceback.print_exc()
+            return False
 
     def load_game(self):
         """Load the crash game page with enhanced anti-detection"""
         try:
             if not self.driver:
-                self.driver = self.setup_driver()
-                if not self.driver:
+                if not self.initialize_browser():
                     return False
                     
             # Clear cookies and cache first
@@ -310,8 +249,7 @@ class CrashGameMonitor:
             # Initialize browser if needed
             if not self.driver:
                 st.info("Setting up browser...")
-                self.driver = self.setup_driver()
-                if not self.driver:
+                if not self.initialize_browser():
                     st.error("Failed to initialize browser. Please try again.")
                     return
                     
@@ -356,7 +294,9 @@ class CrashGameMonitor:
                     if error_count > 5:
                         st.warning("Too many errors, restarting browser...")
                         self.cleanup()
-                        self.driver = self.setup_driver()
+                        if not self.initialize_browser():
+                            st.error("Failed to reinitialize browser. Please try again.")
+                            return
                         error_count = 0
                     time.sleep(2)
                     
@@ -419,7 +359,7 @@ def main():
             if st.session_state.monitor is None:
                 with st.spinner("Setting up browser..."):
                     monitor = CrashGameMonitor()
-                    if monitor.setup_driver():
+                    if monitor.initialize_browser():
                         st.session_state.monitor = monitor
                         monitor.start_monitoring()
                     else:
