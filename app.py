@@ -109,39 +109,159 @@ class CrashGameMonitor:
             
             # Navigate to main page first
             self.driver.get("https://1xbet.com/en/")
-            time.sleep(2)
+            time.sleep(3)  # Wait longer for page load
             
-            # Click login button
-            try:
-                login_button = self.wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a.login")))
-                login_button.click()
-                time.sleep(1)
-            except Exception as e:
-                st.sidebar.error(f"Error clicking login button: {str(e)}")
+            # Try multiple methods to find and click login button
+            login_selectors = [
+                "a.login",
+                "button.login",
+                "div.login",
+                "//a[contains(@class, 'login')]",
+                "//button[contains(@class, 'login')]",
+                "//div[contains(@class, 'login')]",
+                "//a[contains(text(), 'Login')]",
+                "//button[contains(text(), 'Login')]"
+            ]
+
+            clicked = False
+            for selector in login_selectors:
+                try:
+                    st.sidebar.text(f"Trying selector: {selector}")
+                    if selector.startswith("//"):
+                        # XPath
+                        login_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, selector)))
+                    else:
+                        # CSS
+                        login_button = self.wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
+                    
+                    # Try multiple click methods
+                    try:
+                        login_button.click()
+                    except:
+                        try:
+                            self.driver.execute_script("arguments[0].click();", login_button)
+                        except:
+                            continue
+                    
+                    clicked = True
+                    st.sidebar.success(f"Successfully clicked login button using: {selector}")
+                    break
+                except Exception as e:
+                    continue
+
+            if not clicked:
+                # Try direct JavaScript injection
+                st.sidebar.text("Trying JavaScript injection...")
+                js_show_login = """
+                    // Try to find and click any login-related element
+                    function findAndClickLogin() {
+                        const possibleElements = [
+                            ...document.querySelectorAll('a, button, div'),
+                        ].filter(el => {
+                            const text = el.textContent.toLowerCase();
+                            const classes = el.className.toLowerCase();
+                            return text.includes('login') || text.includes('sign in') || 
+                                   classes.includes('login') || classes.includes('signin');
+                        });
+                        
+                        if (possibleElements.length > 0) {
+                            possibleElements[0].click();
+                            return true;
+                        }
+                        return false;
+                    }
+                    return findAndClickLogin();
+                """
+                clicked = self.driver.execute_script(js_show_login)
+
+            if not clicked:
+                st.sidebar.error("Could not find login button")
                 return False
 
-            # Fill in credentials using JavaScript
-            js_login = f"""
-                document.querySelector('input[name="login"]').value = '{username}';
-                document.querySelector('input[name="password"]').value = '{password}';
-                document.querySelector('button[type="submit"]').click();
+            time.sleep(2)  # Wait for login form
+
+            # Try to fill login form using JavaScript
+            js_fill_login = f"""
+                function fillLogin() {{
+                    // Try different input selectors
+                    const inputs = document.querySelectorAll('input');
+                    let loginInput, passwordInput;
+                    
+                    for (const input of inputs) {{
+                        if (input.type === 'text' || input.type === 'email' || 
+                            input.name === 'login' || input.id.includes('login')) {{
+                            loginInput = input;
+                        }}
+                        if (input.type === 'password' || input.name === 'password' || 
+                            input.id.includes('password')) {{
+                            passwordInput = input;
+                        }}
+                    }}
+                    
+                    if (loginInput && passwordInput) {{
+                        loginInput.value = '{username}';
+                        passwordInput.value = '{password}';
+                        
+                        // Try to find and click submit button
+                        const submitButton = document.querySelector('button[type="submit"]') ||
+                                          document.querySelector('input[type="submit"]') ||
+                                          [...document.querySelectorAll('button')].find(b => 
+                                              b.textContent.toLowerCase().includes('login') || 
+                                              b.textContent.toLowerCase().includes('sign in'));
+                        
+                        if (submitButton) {{
+                            submitButton.click();
+                            return true;
+                        }}
+                    }}
+                    return false;
+                }}
+                return fillLogin();
             """
-            self.driver.execute_script(js_login)
-            time.sleep(3)
+            
+            form_filled = self.driver.execute_script(js_fill_login)
+            if not form_filled:
+                st.sidebar.error("Could not fill login form")
+                return False
+
+            time.sleep(3)  # Wait for login to complete
 
             # Verify login success by checking balance
             try:
-                balance_elem = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".header-balance-sum")))
-                self.balance = float(balance_elem.text.strip().replace('MAD', '').strip())
-                st.sidebar.success(f"Logged in successfully! Balance: {self.balance} MAD")
-                self.logged_in = True
-                return True
+                balance_selectors = [
+                    ".header-balance-sum",
+                    ".balance",
+                    "//div[contains(@class, 'balance')]",
+                    "//div[contains(text(), 'MAD')]"
+                ]
+                
+                for selector in balance_selectors:
+                    try:
+                        if selector.startswith("//"):
+                            balance_elem = self.wait.until(EC.presence_of_element_located((By.XPATH, selector)))
+                        else:
+                            balance_elem = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, selector)))
+                        
+                        balance_text = balance_elem.text.strip()
+                        if 'MAD' in balance_text:
+                            self.balance = float(balance_text.replace('MAD', '').strip())
+                            st.sidebar.success(f"Logged in successfully! Balance: {self.balance} MAD")
+                            self.logged_in = True
+                            return True
+                    except:
+                        continue
+                
+                st.sidebar.error("Could not verify login success")
+                return False
             except Exception as e:
                 st.sidebar.error(f"Error verifying login: {str(e)}")
                 return False
 
         except Exception as e:
             st.sidebar.error(f"Login failed: {str(e)}")
+            if hasattr(e, '__traceback__'):
+                import traceback
+                st.sidebar.error(f"Traceback: {traceback.format_exc()}")
             return False
 
     def get_balance(self):
