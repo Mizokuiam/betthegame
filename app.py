@@ -18,7 +18,6 @@ import traceback
 import plotly.express as px
 import random
 import os
-import winreg
 
 class CrashGameMonitor:
     def __init__(self):
@@ -65,15 +64,7 @@ class CrashGameMonitor:
             for path in chrome_paths:
                 if os.path.exists(path):
                     st.info(f"Found Chrome at: {path}")
-                    # Try to get Chrome version
-                    try:
-                        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Google\Chrome\BLBeacon")
-                        version, _ = winreg.QueryValueEx(key, "version")
-                        st.info(f"Chrome version: {version}")
-                        return version
-                    except:
-                        # If we can't get version from registry, return True anyway since we found Chrome
-                        return "114.0.5735.90"  # Default to a stable version
+                    return "120.0.6099.130"  # Use latest stable Chrome version
             
             st.error("Chrome not found in standard locations")
             return None
