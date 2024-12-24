@@ -30,44 +30,41 @@ class CrashGameMonitor:
     def setup_driver(self):
         """Setup and return a configured Chrome driver"""
         try:
+            # Initialize ChromeDriverManager first
+            chrome_driver_path = ChromeDriverManager().install()
+            
+            # Setup options
             chrome_options = Options()
             chrome_options.add_argument('--disable-blink-features=AutomationControlled')
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--start-maximized')
+            chrome_options.add_argument('--ignore-certificate-errors')
+            chrome_options.add_argument('--ignore-ssl-errors')
             
-            # Add more realistic user agent
-            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+            # Add user agent
+            user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            chrome_options.add_argument(f'--user-agent={user_agent}')
             
-            # Add additional preferences to avoid detection
+            # Add experimental options
             chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
             chrome_options.add_experimental_option('useAutomationExtension', False)
             
-            # Create driver with enhanced capabilities
-            driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+            # Create service
+            service = Service(chrome_driver_path)
             
-            # Execute CDP commands to modify navigator.webdriver flag
-            driver.execute_cdp_cmd('Network.setUserAgentOverride', {
-                "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            })
+            # Create driver
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+            
+            # Execute stealth scripts
+            driver.execute_cdp_cmd('Network.setUserAgentOverride', {"userAgent": user_agent})
             driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             
             # Add stealth JS
             stealth_js = """
-            // Overwrite the languages
-            Object.defineProperty(navigator, 'languages', {
-                get: () => ['en-US', 'en', 'es'],
-            });
-            
-            // Overwrite plugins
-            Object.defineProperty(navigator, 'plugins', {
-                get: () => [1, 2, 3, 4, 5],
-            });
-            
-            // Overwrite webdriver
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => false,
-            });
+            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+            Object.defineProperty(navigator, 'webdriver', {get: () => false});
             """
             driver.execute_script(stealth_js)
             
@@ -208,41 +205,34 @@ class CrashGameMonitor:
 
     def start_monitoring(self):
         """Start monitoring the crash game"""
-        if not self.driver:
-            st.error("Browser not initialized. Please try again.")
-            return
-
         try:
-            st.info("Loading game page...")
-            if not self.load_game():
-                return
-            
-            # Wait for page to load
-            time.sleep(5)
-            
-            st.info("Checking page title...")
-            st.write(f"Page Title: {self.driver.title}")
-            
-            # Log if we're on the right page
-            if "crash" in self.driver.current_url.lower():
-                st.success("Successfully loaded the crash game page")
-            else:
-                st.warning(f"Current URL: {self.driver.current_url}")
-            
-            self.analyzing = True
-            
-            if 'history' not in st.session_state:
+            if not hasattr(st.session_state, 'history'):
                 st.session_state.history = []
                 
+            # Add some initial test data if no history exists
+            if len(st.session_state.history) == 0:
+                st.session_state.history = [1.5, 2.3, 1.8, 3.2, 1.2]
+                
+            # Create placeholders for updates
             placeholder = st.empty()
             recommendation_placeholder = st.empty()
             
-            # Add initial test data
-            if not st.session_state.history:
-                st.session_state.history = [1.5, 2.3, 1.8, 3.2, 1.2]
-                st.info("Added initial test data")
-            
+            # Initialize browser if needed
+            if not self.driver:
+                st.info("Setting up browser...")
+                self.driver = self.setup_driver()
+                if not self.driver:
+                    st.error("Failed to initialize browser. Please try again.")
+                    return
+                    
+            st.info("Loading game page...")
+            if not self.load_game():
+                st.error("Failed to load game page. Please try again.")
+                return
+                
+            self.analyzing = True
             error_count = 0
+            
             while self.analyzing:
                 try:
                     self.monitor_game()
@@ -251,28 +241,38 @@ class CrashGameMonitor:
                     with placeholder:
                         col1, col2 = st.columns(2)
                         with col1:
-                            st.metric("Last Crash", f"{self.last_multiplier:.2f}x")
-                            st.metric("Average (Last 5)", f"{sum(st.session_state.history[-5:])/5:.2f}x")
+                            if self.last_multiplier > 0:
+                                st.metric("Last Crash", f"{self.last_multiplier:.2f}x")
+                            if len(st.session_state.history) >= 5:
+                                st.metric("Average (Last 5)", f"{sum(st.session_state.history[-5:])/5:.2f}x")
                         with col2:
-                            st.metric("Max Crash", f"{max(st.session_state.history):.2f}x")
-                            st.metric("Low Crash %", f"{(sum(1 for x in st.session_state.history if x < 2)/len(st.session_state.history)*100):.1f}%")
+                            if len(st.session_state.history) > 0:
+                                st.metric("Max Crash", f"{max(st.session_state.history):.2f}x")
+                                low_crashes = sum(1 for x in st.session_state.history if x < 2)
+                                if len(st.session_state.history) > 0:
+                                    low_crash_pct = (low_crashes/len(st.session_state.history)*100)
+                                    st.metric("Low Crash %", f"{low_crash_pct:.1f}%")
                     
                     # Show recommendation
                     with recommendation_placeholder:
                         recommendation = self.analyze_pattern()
                         st.info(f"💡 Recommendation: {recommendation}")
                         
+                    time.sleep(0.5)
+                    
                 except Exception as e:
                     st.error(f"Error in monitoring loop: {str(e)}")
+                    error_count += 1
+                    if error_count > 5:
+                        st.warning("Too many errors, restarting browser...")
+                        self.cleanup()
+                        self.driver = self.setup_driver()
+                        error_count = 0
                     time.sleep(2)
-                
-                time.sleep(1)
-                
+                    
         except Exception as e:
-            st.error(f"Error accessing the game: {str(e)}")
-            if self.driver:
-                self.driver.quit()
-                self.driver = None
+            st.error(f"Error starting analysis: {str(e)}")
+            self.cleanup()
 
     def stop_monitoring(self):
         """Stop the monitoring process"""
@@ -297,6 +297,12 @@ class CrashGameMonitor:
             return "WAIT: High crash streak, likely to break"
         else:
             return "MONITOR: No clear pattern"
+
+    def cleanup(self):
+        """Cleanup resources"""
+        if self.driver:
+            self.driver.quit()
+            self.driver = None
 
 def main():
     st.set_page_config(page_title="Crash Game Analyzer", layout="wide")
