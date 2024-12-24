@@ -42,20 +42,38 @@ class CrashGameMonitor:
             st.sidebar.error(f"Error saving history: {e}")
 
     def setup_driver(self):
-        """Initialize Chrome driver with stealth settings"""
+        """Initialize Chrome driver with headless mode for Streamlit Cloud"""
         try:
+            from selenium.webdriver.chrome.service import Service
+            from webdriver_manager.chrome import ChromeDriverManager
+            from webdriver_manager.core.os_manager import ChromeType
+
             chrome_options = Options()
+            chrome_options.add_argument('--headless')
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument('--disable-gpu')
             chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+            chrome_options.add_argument('--start-maximized')
             chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
             chrome_options.add_experimental_option('useAutomationExtension', False)
-            
-            self.driver = webdriver.Chrome(options=chrome_options)
+
+            try:
+                # Try using system chrome driver first
+                service = Service()
+                self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            except Exception as e:
+                st.warning(f"Using ChromeDriverManager as fallback: {str(e)}")
+                # Fallback to ChromeDriverManager
+                service = Service(ChromeDriverManager().install())
+                self.driver = webdriver.Chrome(service=service, options=chrome_options)
+
             self.wait = WebDriverWait(self.driver, 20)
             self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
                 'source': 'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
             })
+            
+            st.success("Browser initialized successfully!")
             return True
         except Exception as e:
             st.error(f"Failed to initialize browser: {str(e)}")
