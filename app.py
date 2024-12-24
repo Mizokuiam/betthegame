@@ -110,127 +110,123 @@ class CrashGameMonitor:
             
             # Navigate directly to login page
             self.driver.get("https://1xbet.com/en/login/")
-            time.sleep(3)  # Wait for page load
-
-            # Try to fill login form using JavaScript
-            js_fill_login = f"""
-                function fillLoginForm() {{
-                    // Try all possible input selectors
-                    const usernameSelectors = [
-                        'input[name="login"]',
-                        'input[type="text"]',
-                        'input[placeholder*="ID"]',
-                        'input[placeholder*="Email"]',
-                        '#auth_id_email'
-                    ];
-                    
-                    const passwordSelectors = [
-                        'input[name="password"]',
-                        'input[type="password"]',
-                        '#auth-form-password'
-                    ];
-                    
-                    let usernameField = null;
-                    let passwordField = null;
-                    
-                    // Find username field
-                    for (const selector of usernameSelectors) {{
-                        const field = document.querySelector(selector);
-                        if (field) {{
-                            usernameField = field;
-                            break;
-                        }}
-                    }}
-                    
-                    // Find password field
-                    for (const selector of passwordSelectors) {{
-                        const field = document.querySelector(selector);
-                        if (field) {{
-                            passwordField = field;
-                            break;
-                        }}
-                    }}
-                    
-                    if (usernameField && passwordField) {{
-                        // Fill in credentials
-                        usernameField.value = '{username}';
-                        const usernameEvent = new Event('input', {{ bubbles: true }});
-                        usernameField.dispatchEvent(usernameEvent);
-                        
-                        passwordField.value = '{password}';
-                        const passwordEvent = new Event('input', {{ bubbles: true }});
-                        passwordField.dispatchEvent(passwordEvent);
-                        
-                        // Find and click submit button
-                        const submitSelectors = [
-                            'button[type="submit"]',
-                            '.auth-button',
-                            '.login-button',
-                            'button.submit',
-                            'input[type="submit"]',
-                            'button.auth-button'
-                        ];
-                        
-                        for (const selector of submitSelectors) {{
-                            const submitBtn = document.querySelector(selector);
-                            if (submitBtn) {{
-                                submitBtn.click();
-                                return true;
-                            }}
-                        }}
-                    }}
-                    return false;
-                }}
-                return fillLoginForm();
-            """
+            time.sleep(5)  # Wait longer for page load
             
-            form_filled = self.driver.execute_script(js_fill_login)
-            if not form_filled:
-                # Try alternative method using Selenium
+            # Try multiple approaches to fill the form
+            login_attempts = 0
+            max_attempts = 3
+            
+            while login_attempts < max_attempts:
                 try:
+                    # First try: Direct JavaScript injection
+                    js_code = f"""
+                        function fillForm() {{
+                            // Get all input fields
+                            const inputs = document.querySelectorAll('input');
+                            let loginField = null;
+                            let passwordField = null;
+                            
+                            // Find login and password fields
+                            for (const input of inputs) {{
+                                const type = input.getAttribute('type');
+                                const name = input.getAttribute('name');
+                                const placeholder = (input.getAttribute('placeholder') || '').toLowerCase();
+                                
+                                if (type === 'text' || type === 'email' || 
+                                    (placeholder && (placeholder.includes('id') || placeholder.includes('email')))) {{
+                                    loginField = input;
+                                }}
+                                if (type === 'password') {{
+                                    passwordField = input;
+                                }}
+                            }}
+                            
+                            if (loginField && passwordField) {{
+                                // Fill login
+                                loginField.value = '{username}';
+                                loginField.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                                loginField.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                
+                                // Fill password
+                                passwordField.value = '{password}';
+                                passwordField.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                                passwordField.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                
+                                // Find and click submit button
+                                const buttons = document.querySelectorAll('button');
+                                for (const button of buttons) {{
+                                    if (button.type === 'submit' || 
+                                        button.classList.contains('auth-button') ||
+                                        button.classList.contains('login-button')) {{
+                                        button.click();
+                                        return true;
+                                    }}
+                                }}
+                            }}
+                            return false;
+                        }}
+                        return fillForm();
+                    """
+                    
+                    form_filled = self.driver.execute_script(js_code)
+                    if form_filled:
+                        break
+                    
+                    # Second try: Selenium with explicit waits
                     # Find username field
-                    username_field = self.wait.until(EC.presence_of_element_located((
-                        By.CSS_SELECTOR, 'input[type="text"], input[name="login"], #auth_id_email'
-                    )))
-                    username_field.clear()
-                    username_field.send_keys(username)
+                    username_elements = self.driver.find_elements(By.TAG_NAME, "input")
+                    for elem in username_elements:
+                        try:
+                            elem_type = elem.get_attribute("type")
+                            if elem_type in ["text", "email"]:
+                                elem.clear()
+                                elem.send_keys(username)
+                                break
+                        except:
+                            continue
                     
                     # Find password field
-                    password_field = self.wait.until(EC.presence_of_element_located((
-                        By.CSS_SELECTOR, 'input[type="password"], #auth-form-password'
-                    )))
-                    password_field.clear()
-                    password_field.send_keys(password)
+                    password_elements = self.driver.find_elements(By.CSS_SELECTOR, "input[type='password']")
+                    if password_elements:
+                        password_elements[0].clear()
+                        password_elements[0].send_keys(password)
                     
-                    # Find and click submit button
-                    submit_button = self.wait.until(EC.element_to_be_clickable((
-                        By.CSS_SELECTOR, 'button[type="submit"], .auth-button, .login-button'
-                    )))
-                    submit_button.click()
+                    # Find submit button
+                    submit_buttons = self.driver.find_elements(By.TAG_NAME, "button")
+                    for button in submit_buttons:
+                        try:
+                            if button.get_attribute("type") == "submit" or \
+                               "auth-button" in button.get_attribute("class") or \
+                               "login-button" in button.get_attribute("class"):
+                                button.click()
+                                break
+                        except:
+                            continue
+                    
+                    break
+                    
                 except Exception as e:
-                    st.sidebar.error(f"Could not fill login form using Selenium: {str(e)}")
-                    return False
-
-            time.sleep(3)  # Wait for login to complete
-
+                    login_attempts += 1
+                    st.sidebar.warning(f"Login attempt {login_attempts} failed, retrying...")
+                    time.sleep(2)
+                    continue
+            
+            # Wait for login to complete
+            time.sleep(5)
+            
             # Verify login success
             try:
-                balance_selectors = [
-                    ".header-balance-sum",
-                    ".main-balance",
-                    "//div[contains(@class, 'header-balance')]//span",
-                    "//div[contains(text(), 'MAD')]",
-                    ".balance-value",
-                    "#balance"
+                # Try multiple methods to verify login
+                verification_methods = [
+                    lambda: self.driver.find_element(By.CSS_SELECTOR, ".header-balance-sum"),
+                    lambda: self.driver.find_element(By.CSS_SELECTOR, ".main-balance"),
+                    lambda: self.driver.find_element(By.CSS_SELECTOR, ".balance-value"),
+                    lambda: self.driver.find_element(By.XPATH, "//div[contains(text(), 'MAD')]"),
                 ]
                 
-                for selector in balance_selectors:
+                for method in verification_methods:
                     try:
-                        if selector.startswith("//"):
-                            balance_elem = self.wait.until(EC.presence_of_element_located((By.XPATH, selector)))
-                        else:
-                            balance_elem = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, selector)))
-                        
+                        balance_elem = method()
                         balance_text = balance_elem.text.strip()
                         if 'MAD' in balance_text:
                             self.balance = float(balance_text.replace('MAD', '').strip())
@@ -239,17 +235,18 @@ class CrashGameMonitor:
                             
                             # Navigate to crash game
                             self.driver.get("https://1xbet.com/en/allgamesentrance/crash")
-                            time.sleep(2)  # Wait for navigation
+                            time.sleep(2)
                             return True
                     except:
                         continue
                 
                 st.sidebar.error("Could not verify login success")
                 return False
+                
             except Exception as e:
                 st.sidebar.error(f"Error verifying login: {str(e)}")
                 return False
-
+                
         except Exception as e:
             st.sidebar.error(f"Login failed: {str(e)}")
             if hasattr(e, '__traceback__'):
