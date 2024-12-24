@@ -3,566 +3,252 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime
-import time
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-import json
-from pathlib import Path
-import platform
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from webdriver_manager.core.os_manager import ChromeType
-import traceback
 import plotly.express as px
-import random
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+import json
 import os
 
-class CrashGameMonitor:
+class CrashGameAnalyzer:
     def __init__(self):
-        self.driver = None
         self.history = []
-        self.analyzing = False
-        self.last_multiplier = 0.0
-        self.game_url = "https://1xbet.com/en/allgamesentrance/crash"
-        self.retry_count = 0
-        self.max_retries = 3
+        self.model = None
+        self.scaler = MinMaxScaler()
+        self.load_history()
 
-    @staticmethod
-    def get_browser_path():
-        """Get the path to Chrome executable across different platforms"""
+    def load_history(self):
+        """Load crash history from file if it exists"""
         try:
-            system = platform.system().lower()
-            
-            if system == "windows":
-                chrome_paths = [
-                    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-                    os.path.join(os.environ.get('LOCALAPPDATA', ''), r"Google\Chrome\Application\chrome.exe"),
-                    os.path.join(os.environ.get('PROGRAMFILES', ''), r"Google\Chrome\Application\chrome.exe"),
-                    os.path.join(os.environ.get('PROGRAMFILES(X86)', ''), r"Google\Chrome\Application\chrome.exe")
-                ]
-            elif system == "linux":
-                chrome_paths = [
-                    "/usr/bin/google-chrome",
-                    "/usr/bin/google-chrome-stable",
-                    "/usr/bin/chromium-browser",
-                    "/usr/bin/chromium",
-                    "/snap/bin/chromium",
-                    "/snap/bin/google-chrome"
-                ]
-            elif system == "darwin":  # macOS
-                chrome_paths = [
-                    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-                    "~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-                ]
-            else:
-                st.error(f"Unsupported operating system: {system}")
-                return None
-                
-            # Try all possible paths
-            for path in chrome_paths:
-                if os.path.exists(os.path.expanduser(path)):
-                    st.info(f"Found Chrome browser at: {path}")
-                    return path
-                    
-            st.error(f"Chrome not found in common locations for {system}")
-            return None
-            
+            if os.path.exists('crash_history.json'):
+                with open('crash_history.json', 'r') as f:
+                    self.history = json.load(f)
+                st.success(f"Loaded {len(self.history)} historical crash points")
         except Exception as e:
-            st.error(f"Error checking Chrome installation: {str(e)}")
-            return None
+            st.error(f"Error loading history: {str(e)}")
 
-    def is_chrome_installed(self):
-        """Check if Chrome is installed and get its version"""
+    def save_history(self):
+        """Save crash history to file"""
         try:
-            # Common Chrome paths
-            chrome_paths = [
-                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-                os.path.join(os.environ.get('LOCALAPPDATA', ''), r"Google\Chrome\Application\chrome.exe"),
-            ]
-            
-            for path in chrome_paths:
-                if os.path.exists(path):
-                    st.info(f"Found Chrome at: {path}")
-                    return "120.0.6099.130"  # Use latest stable Chrome version
-            
-            st.error("Chrome not found in standard locations")
-            return None
+            with open('crash_history.json', 'w') as f:
+                json.dump(self.history, f)
         except Exception as e:
-            st.error(f"Error checking Chrome installation: {str(e)}")
-            return None
+            st.error(f"Error saving history: {str(e)}")
 
-    def initialize_browser(self):
-        """Initialize the Chrome browser with specific options"""
+    def add_crash_point(self, value):
+        """Add a new crash point to history"""
         try:
-            chrome_options = Options()
-            
-            # Essential options
-            chrome_options.add_argument('--no-sandbox')
-            chrome_options.add_argument('--headless=new')
-            chrome_options.add_argument('--disable-dev-shm-usage')
-            chrome_options.add_argument('--disable-gpu')
-            
-            # Enhanced anti-detection options
-            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-            chrome_options.add_argument('--disable-infobars')
-            chrome_options.add_argument('--window-size=1920,1080')
-            chrome_options.add_argument('--start-maximized')
-            chrome_options.add_argument('--disable-extensions')
-            chrome_options.add_argument('--disable-popup-blocking')
-            chrome_options.add_argument('--disable-notifications')
-            chrome_options.add_argument('--disable-dev-tools')
-            chrome_options.add_argument('--ignore-certificate-errors')
-            chrome_options.add_argument('--enable-javascript')
-            
-            # Add proxy if available
-            proxy = os.getenv('HTTP_PROXY')
-            if proxy:
-                chrome_options.add_argument(f'--proxy-server={proxy}')
-                st.info(f"Using proxy: {proxy}")
-            
-            chrome_options.add_experimental_option('excludeSwitches', ['enable-automation', 'enable-logging'])
-            chrome_options.add_experimental_option('useAutomationExtension', False)
-            
-            # Enhanced User-Agent list
-            user_agents = [
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
-                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            ]
-            user_agent = random.choice(user_agents)
-            chrome_options.add_argument(f'--user-agent={user_agent}')
-            
-            # Get Chrome browser path
-            browser_path = self.get_browser_path()
-            if not browser_path:
-                st.error("Chrome browser not found. Please install Chrome or Chromium.")
-                st.info("For Linux, try: sudo apt-get install google-chrome-stable")
-                return False
-                
-            chrome_options.binary_location = browser_path
-            
-            try:
-                from selenium.webdriver.chrome.service import Service
-                from webdriver_manager.chrome import ChromeDriverManager
-                from webdriver_manager.core.os_manager import ChromeType
-                
-                if "chromium" in browser_path.lower():
-                    st.info("Using Chromium configuration")
-                    driver_path = ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install()
-                else:
-                    st.info("Using Chrome configuration")
-                    driver_path = ChromeDriverManager().install()
-                    
-                st.info(f"ChromeDriver installed at: {driver_path}")
-                
-                service = Service(executable_path=driver_path)
-                self.driver = webdriver.Chrome(service=service, options=chrome_options)
-                
-                # Enhanced stealth configurations
-                self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {"userAgent": user_agent})
-                
-                # Advanced stealth JavaScript
-                stealth_js = """
-                    // Override navigator properties
-                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                    Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-                    Object.defineProperty(navigator, 'plugins', {get: () => [
-                        {name: 'Chrome PDF Plugin'}, 
-                        {name: 'Chrome PDF Viewer'}, 
-                        {name: 'Native Client'}
-                    ]});
-                    Object.defineProperty(navigator, 'permissions', {get: () => ({
-                        query: () => Promise.resolve({state: 'granted'})
-                    })});
-                    Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
-                    
-                    // Add WebGL support
-                    HTMLCanvasElement.prototype.getContext = ((orig) => {
-                        return function(type) {
-                            return orig.apply(this, arguments);
-                        };
-                    })(HTMLCanvasElement.prototype.getContext);
-                """
-                self.driver.execute_script(stealth_js)
-                
-                # Add additional headers
-                self.driver.execute_cdp_cmd('Network.setExtraHTTPHeaders', {
-                    'headers': {
-                        'Accept-Language': 'en-US,en;q=0.9',
-                        'Accept-Encoding': 'gzip, deflate, br',
-                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
-                    }
-                })
-                
-                st.success("Browser initialized successfully")
+            value = float(value)
+            if value > 1.0:
+                self.history.append(value)
+                self.save_history()
                 return True
-                
-            except Exception as e:
-                st.error(f"Failed to initialize ChromeDriver: {str(e)}")
-                traceback.print_exc()
-                return False
-                
-        except Exception as e:
-            st.error(f"Error during WebDriver setup: {str(e)}")
-            traceback.print_exc()
-            return False
-
-    def load_game(self):
-        """Load the crash game page with enhanced anti-detection"""
-        try:
-            if not self.driver:
-                if not self.initialize_browser():
-                    return False
-                    
-            st.info("Loading game page...")
-            
-            # Clear cookies and cache first
-            self.driver.execute_cdp_cmd('Network.clearBrowserCookies', {})
-            self.driver.execute_cdp_cmd('Network.clearBrowserCache', {})
-            
-            # Add random delay before loading
-            time.sleep(random.uniform(2, 4))
-            
-            # Load the page with retry mechanism
-            max_retries = 3
-            retry_count = 0
-            
-            while retry_count < max_retries:
-                try:
-                    # Set a new random user agent for each attempt
-                    user_agent = random.choice([
-                        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-                        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                    ])
-                    self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {"userAgent": user_agent})
-                    
-                    # Set random viewport size
-                    width = random.randint(1024, 1920)
-                    height = random.randint(768, 1080)
-                    self.driver.set_window_size(width, height)
-                    
-                    # Try loading the page
-                    self.driver.get(self.game_url)
-                    time.sleep(random.uniform(3, 5))
-                    
-                    # Check for various blocking indicators
-                    page_source = self.driver.page_source.lower()
-                    page_url = self.driver.current_url.lower()
-                    
-                    block_indicators = [
-                        'access denied', 'blocked', 'captcha', 'security check',
-                        'unusual traffic', 'automated', 'bot', 'javascript'
-                    ]
-                    
-                    if any(text in page_source for text in block_indicators) or \
-                       any(text in page_url for text in ['security', 'check', 'blocked']):
-                        retry_count += 1
-                        if retry_count < max_retries:
-                            st.warning("Access appears to be restricted. Trying to bypass...")
-                            
-                            # Additional bypass attempts
-                            self.driver.delete_all_cookies()
-                            self.driver.execute_cdp_cmd('Network.clearBrowserCookies', {})
-                            self.driver.execute_cdp_cmd('Network.clearBrowserCache', {})
-                            
-                            # Try to bypass with different headers
-                            self.driver.execute_cdp_cmd('Network.setExtraHTTPHeaders', {
-                                'headers': {
-                                    'Accept-Language': f'en-US,en;q=0.{random.randint(7,9)}',
-                                    'Accept-Encoding': 'gzip, deflate, br',
-                                    'Accept': '*/*',
-                                    'Connection': 'keep-alive',
-                                    'Sec-Fetch-Dest': 'document',
-                                    'Sec-Fetch-Mode': 'navigate',
-                                    'Sec-Fetch-Site': 'none',
-                                    'Sec-Fetch-User': '?1',
-                                    'Upgrade-Insecure-Requests': '1'
-                                }
-                            })
-                            
-                            time.sleep(random.uniform(5, 10))
-                            continue
-                        else:
-                            st.error("Still restricted. Please try using a different IP or waiting a while.")
-                            return False
-                    
-                    # Check if page loaded successfully
-                    try:
-                        WebDriverWait(self.driver, 10).until(
-                            EC.presence_of_element_located((By.TAG_NAME, "body"))
-                        )
-                        st.success("Game page loaded successfully")
-                        return True
-                    except Exception as e:
-                        st.warning("Page might not be fully loaded, but continuing...")
-                        return True
-                    
-                except Exception as e:
-                    retry_count += 1
-                    if retry_count < max_retries:
-                        st.warning(f"Failed to load page (attempt {retry_count}). Retrying...")
-                        time.sleep(random.uniform(2, 4))
-                    else:
-                        st.error(f"Failed to load game page: {str(e)}")
-                        return False
-            
-            return False
-            
-        except Exception as e:
-            st.error(f"Error loading game page: {str(e)}")
-            traceback.print_exc()
-            return False
-
-    def get_crash_value(self):
-        """Get the current crash value from multiple possible selectors"""
-        selectors = [
-            '.crash-value', 
-            '.crash-multiplier',
-            '.multiplier-value',
-            '.game-value',
-            'div[class*="crash"] span[class*="value"]',
-            'div[class*="multiplier"] span[class*="value"]'
-        ]
-        
-        for selector in selectors:
-            try:
-                element = WebDriverWait(self.driver, 2).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, selector))
-                )
-                value_text = element.text.strip()
-                if value_text and 'x' in value_text.lower():
-                    return float(value_text.lower().replace('x', '').strip())
-            except:
-                continue
-                
-        return None
-
-    def check_game_state(self):
-        """Check if game is in progress, waiting, or crashed"""
-        try:
-            # Check timer element for waiting state
-            timer = self.driver.find_element(By.CSS_SELECTOR, '.timer, .countdown, [class*="timer"], [class*="countdown"]')
-            if timer and timer.is_displayed():
-                time_text = timer.text.strip()
-                if time_text and any(x in time_text.lower() for x in ['sec', 's', 'seconds']):
-                    return 'waiting'
         except:
-            pass
-            
-        try:
-            # Check crash animation/state
-            crash_elements = self.driver.find_elements(By.CSS_SELECTOR, '.crash-animation, .game-crash, [class*="crash"]')
-            for elem in crash_elements:
-                if elem.is_displayed():
-                    class_name = elem.get_attribute('class').lower()
-                    if any(x in class_name for x in ['crashed', 'end', 'finished']):
-                        return 'crashed'
-                    elif any(x in class_name for x in ['flying', 'active', 'progress']):
-                        return 'in_progress'
-        except:
-            pass
-            
-        return 'unknown'
+            return False
+        return False
 
-    def monitor_game(self):
-        """Monitor the crash game and return crash values and states"""
-        last_value = None
-        values = []
+    def prepare_data(self, sequence_length=10):
+        """Prepare data for ML model"""
+        if len(self.history) < sequence_length + 1:
+            return None, None
+
+        X, y = [], []
+        for i in range(len(self.history) - sequence_length):
+            X.append(self.history[i:i + sequence_length])
+            y.append(self.history[i + sequence_length])
+
+        X = np.array(X)
+        y = np.array(y)
         
-        while True:
-            try:
-                state = self.check_game_state()
-                current_value = self.get_crash_value()
-                
-                if state == 'crashed' and current_value and current_value != last_value:
-                    values.append(current_value)
-                    last_value = current_value
-                    st.write(f"Crash value: {current_value}x")
-                    
-                    # Analyze pattern
-                    if len(values) >= 5:
-                        last_5 = values[-5:]
-                        avg = sum(last_5) / 5
-                        if avg < 2.0:
-                            st.success("TAKE: Low values pattern detected")
-                        elif avg > 5.0:
-                            st.warning("WAIT: High values pattern detected")
-                        else:
-                            st.info("MONITOR: Normal pattern")
-                            
-                time.sleep(0.5)
-                
-            except Exception as e:
-                st.error(f"Error monitoring game: {str(e)}")
-                time.sleep(1)
-                continue
+        # Scale the data
+        X_scaled = self.scaler.fit_transform(X)
+        y_scaled = self.scaler.transform(y.reshape(-1, 1)).ravel()
+        
+        return X_scaled, y_scaled
 
-    def start_monitoring(self):
-        """Start monitoring the crash game"""
+    def train_model(self):
+        """Train the ML model on historical data"""
+        X, y = self.prepare_data()
+        if X is None or len(X) < 20:  # Need at least 20 sequences to train
+            return False
+
         try:
-            if not hasattr(st.session_state, 'history'):
-                st.session_state.history = []
-                
-            # Add some initial test data if no history exists
-            if len(st.session_state.history) == 0:
-                st.session_state.history = [1.5, 2.3, 1.8, 3.2, 1.2]
-                
-            # Create placeholders for updates
-            placeholder = st.empty()
-            recommendation_placeholder = st.empty()
-            
-            # Initialize browser if needed
-            if not self.driver:
-                st.info("Setting up browser...")
-                if not self.initialize_browser():
-                    st.error("Failed to initialize browser. Please try again.")
-                    return
-                    
-            st.info("Loading game page...")
-            if not self.load_game():
-                st.error("Failed to load game page. Please try again.")
-                return
-                
-            self.analyzing = True
-            error_count = 0
-            
-            while self.analyzing:
-                try:
-                    self.monitor_game()
-                    
-                    # Update analysis in real-time
-                    with placeholder:
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            if self.last_multiplier > 0:
-                                st.metric("Last Crash", f"{self.last_multiplier:.2f}x")
-                            if len(st.session_state.history) >= 5:
-                                st.metric("Average (Last 5)", f"{sum(st.session_state.history[-5:])/5:.2f}x")
-                        with col2:
-                            if len(st.session_state.history) > 0:
-                                st.metric("Max Crash", f"{max(st.session_state.history):.2f}x")
-                                low_crashes = sum(1 for x in st.session_state.history if x < 2)
-                                if len(st.session_state.history) > 0:
-                                    low_crash_pct = (low_crashes/len(st.session_state.history)*100)
-                                    st.metric("Low Crash %", f"{low_crash_pct:.1f}%")
-                    
-                    # Show recommendation
-                    with recommendation_placeholder:
-                        recommendation = self.analyze_pattern()
-                        st.info(f"💡 Recommendation: {recommendation}")
-                        
-                    time.sleep(0.5)
-                    
-                except Exception as e:
-                    st.error(f"Error in monitoring loop: {str(e)}")
-                    error_count += 1
-                    if error_count > 5:
-                        st.warning("Too many errors, restarting browser...")
-                        self.cleanup()
-                        if not self.initialize_browser():
-                            st.error("Failed to reinitialize browser. Please try again.")
-                            return
-                        error_count = 0
-                    time.sleep(2)
-                    
+            # Split data
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+            # Train model
+            self.model = RandomForestRegressor(n_estimators=100, random_state=42)
+            self.model.fit(X_train, y_train)
+
+            # Calculate accuracy
+            train_score = self.model.score(X_train, y_train)
+            test_score = self.model.score(X_test, y_test)
+
+            st.info(f"Model trained successfully. Train score: {train_score:.2f}, Test score: {test_score:.2f}")
+            return True
         except Exception as e:
-            st.error(f"Error starting analysis: {str(e)}")
-            self.cleanup()
+            st.error(f"Error training model: {str(e)}")
+            return False
 
-    def stop_monitoring(self):
-        """Stop the monitoring process"""
-        self.analyzing = False
-        if self.driver:
-            self.driver.quit()
-            self.driver = None
+    def predict_next_crash(self):
+        """Predict the next crash point"""
+        if self.model is None or len(self.history) < 10:
+            return None
 
-    def analyze_pattern(self):
-        """Analyze crash pattern and provide recommendation"""
-        if len(self.history) < 5:
-            return "Need more data for analysis"
+        try:
+            # Prepare last 10 points for prediction
+            last_sequence = np.array(self.history[-10:]).reshape(1, -1)
+            last_sequence_scaled = self.scaler.transform(last_sequence)
             
-        last_5 = self.history[-5:]
-        avg_5 = sum(last_5) / 5
+            # Make prediction
+            prediction_scaled = self.model.predict(last_sequence_scaled)
+            prediction = self.scaler.inverse_transform(prediction_scaled.reshape(-1, 1))
+            
+            return float(prediction[0][0])
+        except Exception as e:
+            st.error(f"Error making prediction: {str(e)}")
+            return None
+
+    def get_betting_advice(self, prediction):
+        """Generate betting advice based on prediction and patterns"""
+        if prediction is None:
+            return None
+
+        advice = {
+            'prediction': prediction,
+            'confidence': 'low',
+            'recommended_exit': 0,
+            'strategy': ''
+        }
+
+        # Analyze recent volatility
+        recent_points = self.history[-10:]
+        volatility = np.std(recent_points)
+        mean_value = np.mean(recent_points)
         
-        if avg_5 < 1.8:
-            return "TAKE: High chance of bigger crash (2x+)"
-        elif all(x < 2 for x in last_5):
-            return "TAKE: Due for a high crash"
-        elif all(x > 2 for x in last_5):
-            return "WAIT: High crash streak, likely to break"
+        # Adjust confidence based on volatility
+        if volatility < 0.5:
+            advice['confidence'] = 'high'
+        elif volatility < 1.0:
+            advice['confidence'] = 'medium'
+
+        # Set recommended exit point
+        if prediction > mean_value * 1.2:  # If prediction is significantly higher
+            advice['recommended_exit'] = mean_value * 1.1
+            advice['strategy'] = 'Aggressive'
         else:
-            return "MONITOR: No clear pattern"
+            advice['recommended_exit'] = min(prediction * 0.9, mean_value)
+            advice['strategy'] = 'Conservative'
 
-    def cleanup(self):
-        """Cleanup resources"""
-        if self.driver:
-            self.driver.quit()
-            self.driver = None
+        return advice
+
+    def plot_history(self):
+        """Plot crash history and predictions"""
+        if len(self.history) < 2:
+            return None
+
+        df = pd.DataFrame({
+            'Index': range(len(self.history)),
+            'Crash Point': self.history
+        })
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=df['Index'],
+            y=df['Crash Point'],
+            mode='lines+markers',
+            name='Crash Points'
+        ))
+
+        # Add threshold line
+        fig.add_hline(y=2.0, line_dash="dash", line_color="red", annotation_text="2x threshold")
+
+        fig.update_layout(
+            title='Crash History',
+            xaxis_title='Game Number',
+            yaxis_title='Crash Point',
+            hovermode='x'
+        )
+
+        return fig
 
 def main():
-    st.set_page_config(page_title="Crash Game Analyzer", layout="wide")
+    st.title('Crash Game AI Analyzer')
     
-    st.title("Crash Game Analyzer")
+    # Initialize analyzer
+    if 'analyzer' not in st.session_state:
+        st.session_state.analyzer = CrashGameAnalyzer()
     
+    analyzer = st.session_state.analyzer
+
+    # Sidebar for adding new crash points
+    with st.sidebar:
+        st.header("Add Crash Points")
+        new_point = st.text_input("Enter crash point (e.g., 2.5):")
+        if st.button("Add Point"):
+            if analyzer.add_crash_point(new_point):
+                st.success(f"Added crash point: {new_point}")
+            else:
+                st.error("Invalid crash point. Must be a number greater than 1.0")
+
+        st.markdown("---")
+        if st.button("Train AI Model"):
+            analyzer.train_model()
+
+    # Main content
     col1, col2 = st.columns(2)
     
     with col1:
-        st.header("Instructions")
-        st.markdown("""
-        1. Click the button below to open 1xBet Crash Game in a new tab
-        2. Log in to your account
-        3. Navigate to the Crash game
-        4. Return to this window and start the analysis
-        """)
-        
-        st.link_button("Open 1xBet Crash Game", "https://1xbet.com/en/allgamesentrance/crash")
-        
-        if 'monitor' not in st.session_state:
-            st.session_state.monitor = None
-            
-        if st.button("Start Analysis"):
-            if st.session_state.monitor is None:
-                with st.spinner("Setting up browser..."):
-                    monitor = CrashGameMonitor()
-                    if monitor.initialize_browser():
-                        st.session_state.monitor = monitor
-                        monitor.start_monitoring()
-                    else:
-                        st.error("Failed to initialize browser. Please try again.")
-                        
-        if st.button("Stop Analysis", disabled=st.session_state.monitor is None):
-            if st.session_state.monitor:
-                st.session_state.monitor.stop_monitoring()
-                st.session_state.monitor = None
-                st.success("Analysis stopped")
-    
-    with col2:
-        st.header("Analysis")
-        
-        # Display analysis results
-        if 'history' in st.session_state and len(st.session_state.history) > 0:
-            df = pd.DataFrame({'multiplier': st.session_state.history})
-            
-            # Plot trend
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(y=df['multiplier'], mode='lines+markers', name='Crash Values'))
-            fig.add_hline(y=2, line_dash="dash", line_color="red", annotation_text="2x threshold")
-            fig.update_layout(title="Crash History", height=400)
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Show last 10 crashes
-            st.subheader("Last 10 Crashes")
-            st.write(" → ".join([f"{x:.2f}x" for x in df['multiplier'].tail(10)]))
+        st.subheader("Last 10 Crashes")
+        if len(analyzer.history) >= 10:
+            last_10 = analyzer.history[-10:]
+            st.write(" → ".join([f"{x:.2f}x" for x in last_10]))
         else:
-            st.info("Start the analysis to see crash game statistics")
+            st.info("Need more crash points for analysis")
+
+    with col2:
+        st.subheader("Statistics")
+        if len(analyzer.history) > 0:
+            stats = {
+                "Average": np.mean(analyzer.history),
+                "Max": np.max(analyzer.history),
+                "Min": np.min(analyzer.history),
+                "Volatility": np.std(analyzer.history)
+            }
+            for key, value in stats.items():
+                st.metric(key, f"{value:.2f}")
+
+    # Plot history
+    st.subheader("Crash History Analysis")
+    fig = analyzer.plot_history()
+    if fig:
+        st.plotly_chart(fig, use_container_width=True)
+
+    # Predictions and advice
+    st.subheader("AI Predictions")
+    if len(analyzer.history) >= 20:  # Need at least 20 points for meaningful prediction
+        prediction = analyzer.predict_next_crash()
+        if prediction:
+            advice = analyzer.get_betting_advice(prediction)
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Predicted Crash", f"{prediction:.2f}x")
+            with col2:
+                st.metric("Recommended Exit", f"{advice['recommended_exit']:.2f}x")
+            with col3:
+                st.metric("Confidence", advice['confidence'].upper())
+
+            st.info(f"Strategy: {advice['strategy']}")
+            
+            if advice['confidence'] == 'high':
+                st.success("✅ Good conditions for betting")
+            elif advice['confidence'] == 'medium':
+                st.warning("⚠️ Moderate risk")
+            else:
+                st.error("❌ High risk - Consider waiting")
+    else:
+        st.info("Need at least 20 crash points to make predictions")
 
 if __name__ == "__main__":
     main()
