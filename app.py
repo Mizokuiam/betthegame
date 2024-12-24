@@ -8,8 +8,8 @@ from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 import time
-import plotly.express as px
-import plotly.graph_objects as go
+import threading
+import queue
 
 # Page configuration
 st.set_page_config(
@@ -20,12 +20,18 @@ st.set_page_config(
 )
 
 # Initialize session state
+if 'historical_data' not in st.session_state:
+    st.session_state.historical_data = pd.DataFrame()
 if 'model' not in st.session_state:
     st.session_state.model = None
-if 'historical_data' not in st.session_state:
-    st.session_state.historical_data = None
+if 'scaler' not in st.session_state:
+    st.session_state.scaler = StandardScaler()
 if 'last_prediction' not in st.session_state:
     st.session_state.last_prediction = None
+if 'auto_update' not in st.session_state:
+    st.session_state.auto_update = False
+if 'data_queue' not in st.session_state:
+    st.session_state.data_queue = queue.Queue()
 
 # Custom CSS
 st.markdown("""
@@ -46,10 +52,13 @@ st.markdown("""
         background-color: #2E2E2E;
         margin: 10px 0;
     }
-    .metric-card {
-        background-color: #2E2E2E;
+    .latest-crash {
+        font-size: 24px;
+        font-weight: bold;
         padding: 15px;
         border-radius: 10px;
+        background-color: #2E2E2E;
+        margin: 10px 0;
         text-align: center;
     }
     </style>
@@ -57,170 +66,161 @@ st.markdown("""
 
 class CrashGamePredictor:
     def __init__(self):
-        self.model = None
-        self.scaler = StandardScaler()
+        self.model = st.session_state.model
+        self.scaler = st.session_state.scaler
     
-    def scrape_data(self):
+    def scrape_latest_game(self):
+        """Simulate scraping the latest game data"""
         try:
-            # Simulated data for demonstration
-            np.random.seed(int(time.time()))
-            n_samples = 1000
-            data = {
-                'timestamp': pd.date_range(end=pd.Timestamp.now(), periods=n_samples, freq='1min'),
-                'round_id': range(n_samples),
-                'bet_amount': np.random.uniform(10, 1000, n_samples),
-                'odds': np.random.uniform(1.1, 10.0, n_samples),
-                'crash_point': np.random.uniform(1.0, 15.0, n_samples),
+            # Simulated latest game data
+            latest_data = {
+                'timestamp': pd.Timestamp.now(),
+                'bet_amount': np.random.uniform(10, 1000),
+                'odds': np.random.uniform(1.1, 10.0),
+                'crash_point': np.random.uniform(1.0, 15.0),
             }
-            df = pd.DataFrame(data)
-            df['win'] = df['crash_point'] >= df['odds']
-            df['profit'] = np.where(df['win'], 
-                                  df['bet_amount'] * (df['odds'] - 1),
-                                  -df['bet_amount'])
-            return df
+            return pd.Series(latest_data)
         except Exception as e:
             st.error(f"Error scraping data: {str(e)}")
             return None
 
     def prepare_features(self, data):
+        if len(data) < 1:
+            return None, None
+        
         # Feature engineering
         data['hour'] = data['timestamp'].dt.hour
         data['minute'] = data['timestamp'].dt.minute
-        data['rolling_avg_crash'] = data['crash_point'].rolling(window=10, min_periods=1).mean()
-        data['rolling_std_crash'] = data['crash_point'].rolling(window=10, min_periods=1).std()
+        data['rolling_avg_crash'] = data['crash_point'].rolling(window=5, min_periods=1).mean()
+        data['rolling_std_crash'] = data['crash_point'].rolling(window=5, min_periods=1).std()
+        data['rolling_min_crash'] = data['crash_point'].rolling(window=5, min_periods=1).min()
+        data['rolling_max_crash'] = data['crash_point'].rolling(window=5, min_periods=1).max()
         
-        features = ['bet_amount', 'odds', 'hour', 'minute', 'rolling_avg_crash', 'rolling_std_crash']
-        return data[features], data['win']
+        features = ['hour', 'minute', 'rolling_avg_crash', 'rolling_std_crash', 
+                   'rolling_min_crash', 'rolling_max_crash']
+        X = data[features].fillna(0)
+        y = (data['crash_point'] >= data['odds']).astype(int)
+        return X, y
 
     def train_model(self, data):
         X, y = self.prepare_features(data)
+        if X is None or len(X) < 10:
+            return None
+            
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
         
         # Scale features
         X_train_scaled = self.scaler.fit_transform(X_train)
-        X_test_scaled = self.scaler.transform(X_test)
         
         # Train XGBoost model
-        self.model = xgb.XGBClassifier(
+        self.model = xgb.XGBRegressor(
             n_estimators=100,
             learning_rate=0.1,
-            max_depth=5,
+            max_depth=3,
             random_state=42
         )
         self.model.fit(X_train_scaled, y_train)
         
-        # Calculate accuracy
-        accuracy = self.model.score(X_test_scaled, y_test)
-        return accuracy
+        # Save model and scaler to session state
+        st.session_state.model = self.model
+        st.session_state.scaler = self.scaler
+        return True
 
-    def predict(self, bet_amount, odds, current_data):
-        if self.model is None:
-            return None
+    def predict_crash_point(self, current_data):
+        if self.model is None or len(current_data) < 5:
+            return None, None
         
-        # Prepare features for prediction
-        current_time = pd.Timestamp.now()
-        features = pd.DataFrame({
-            'bet_amount': [bet_amount],
-            'odds': [odds],
-            'hour': [current_time.hour],
-            'minute': [current_time.minute],
-            'rolling_avg_crash': [current_data['crash_point'].tail(10).mean()],
-            'rolling_std_crash': [current_data['crash_point'].tail(10).std()]
-        })
+        X, _ = self.prepare_features(current_data.tail(10))
+        if X is None:
+            return None, None
+            
+        X_latest = X.iloc[-1:].copy()
+        X_scaled = self.scaler.transform(X_latest)
         
-        features_scaled = self.scaler.transform(features)
-        probability = self.model.predict_proba(features_scaled)[0][1]
-        return probability
+        # Predict crash point range
+        predicted_value = self.model.predict(X_scaled)[0]
+        
+        # Calculate confidence based on recent prediction accuracy
+        recent_predictions = current_data['crash_point'].tail(5)
+        confidence = max(0, min(100, 100 - recent_predictions.std() * 10))
+        
+        return predicted_value, confidence
 
-def create_metrics_chart(data):
-    metrics_data = {
-        'Average Crash Point': data['crash_point'].mean(),
-        'Win Rate': (data['win'].sum() / len(data)) * 100,
-        'Total Profit': data['profit'].sum(),
-        'ROI': (data['profit'].sum() / data['bet_amount'].sum()) * 100
-    }
+def update_data():
+    predictor = CrashGamePredictor()
+    latest_data = predictor.scrape_latest_game()
     
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Avg Crash Point", f"{metrics_data['Average Crash Point']:.2f}")
-    with col2:
-        st.metric("Win Rate", f"{metrics_data['Win Rate']:.1f}%")
-    with col3:
-        st.metric("Total Profit", f"${metrics_data['Total Profit']:.2f}")
-    with col4:
-        st.metric("ROI", f"{metrics_data['ROI']:.1f}%")
-
-def create_crash_history_chart(data):
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=data['timestamp'],
-        y=data['crash_point'],
-        mode='lines',
-        name='Crash Points',
-        line=dict(color='#4CAF50')
-    ))
-    fig.update_layout(
-        title='Crash Point History',
-        xaxis_title='Time',
-        yaxis_title='Crash Point',
-        template='plotly_dark',
-        height=400
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    if latest_data is not None:
+        # Add to historical data
+        st.session_state.historical_data = pd.concat([
+            st.session_state.historical_data,
+            pd.DataFrame([latest_data])
+        ]).tail(100)  # Keep last 100 records
+        
+        # Train model periodically
+        if len(st.session_state.historical_data) >= 10:
+            predictor.train_model(st.session_state.historical_data)
+        
+        # Make prediction
+        predicted_crash, confidence = predictor.predict_crash_point(st.session_state.historical_data)
+        if predicted_crash is not None:
+            st.session_state.last_prediction = {
+                'crash_point': predicted_crash,
+                'confidence': confidence
+            }
 
 def main():
-    st.title("🎮 CrashPredict AI")
+    st.title("🎮 CrashPredict AI - Live Predictions")
     
-    predictor = CrashGamePredictor()
-    
+    # Sidebar controls
     with st.sidebar:
-        st.header("Controls")
-        if st.button("🔄 Scrape New Data"):
-            with st.spinner("Scraping data..."):
-                data = predictor.scrape_data()
-                if data is not None:
-                    st.session_state.historical_data = data
-                    with st.spinner("Training model..."):
-                        accuracy = predictor.train_model(data)
-                        st.success(f"Model trained with accuracy: {accuracy:.2%}")
-                        st.session_state.model = predictor.model
+        st.header("Settings")
+        auto_update = st.toggle("Enable Live Updates", value=st.session_state.auto_update)
+        update_interval = st.slider("Update Interval (seconds)", 1, 10, 2)
         
-        st.markdown("---")
-        st.subheader("Prediction Settings")
-        bet_amount = st.number_input("Bet Amount ($)", min_value=1.0, value=100.0, step=10.0)
-        odds = st.number_input("Target Odds", min_value=1.1, value=2.0, step=0.1)
-        
-        if st.button("🎯 Predict"):
-            if st.session_state.model is None:
-                st.warning("Please scrape data and train the model first")
-            else:
-                probability = predictor.predict(bet_amount, odds, st.session_state.historical_data)
-                st.session_state.last_prediction = probability
+        if auto_update != st.session_state.auto_update:
+            st.session_state.auto_update = auto_update
+            st.experimental_rerun()
     
-    if st.session_state.historical_data is not None:
-        create_metrics_chart(st.session_state.historical_data)
+    # Main content area
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.subheader("Live Game Data")
+        if len(st.session_state.historical_data) > 0:
+            latest_crash = st.session_state.historical_data['crash_point'].iloc[-1]
+            st.markdown(f"""
+                <div class='latest-crash'>
+                    Latest Crash Point: {latest_crash:.2f}x
+                </div>
+            """, unsafe_allow_html=True)
         
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            create_crash_history_chart(st.session_state.historical_data)
-        
-        with col2:
-            if st.session_state.last_prediction is not None:
-                st.markdown("### 🎯 Prediction Results")
-                prob_pct = st.session_state.last_prediction * 100
-                st.markdown(f"""
-                    <div class='prediction-box'>
-                        <h4>Win Probability</h4>
-                        <h2 style='color: {"#4CAF50" if prob_pct > 50 else "#ff4444"}'>{prob_pct:.1f}%</h2>
-                        <p>Expected Value: ${(bet_amount * (odds - 1) * st.session_state.last_prediction - bet_amount * (1 - st.session_state.last_prediction)):.2f}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-            
-            st.markdown("### 📊 Recent Games")
+        # Recent games table
+        if not st.session_state.historical_data.empty:
             st.dataframe(
-                st.session_state.historical_data.tail(5)[['timestamp', 'crash_point', 'win']],
-                hide_index=True
+                st.session_state.historical_data.tail(10)[['timestamp', 'crash_point']],
+                hide_index=True,
+                use_container_width=True
             )
+    
+    with col2:
+        st.subheader("Next Crash Prediction")
+        if st.session_state.last_prediction:
+            pred = st.session_state.last_prediction
+            st.markdown(f"""
+                <div class='prediction-box'>
+                    <h3>Predicted Crash Point</h3>
+                    <h2 style='color: #4CAF50'>{pred['crash_point']:.2f}x</h2>
+                    <p>Confidence: {pred['confidence']:.1f}%</p>
+                    <p>Recommended Bet: {max(1.0, min(pred['crash_point'] - 0.5, 2.0)):.2f}x</p>
+                </div>
+            """, unsafe_allow_html=True)
+    
+    # Auto-update loop
+    if st.session_state.auto_update:
+        update_data()
+        time.sleep(update_interval)
+        st.experimental_rerun()
 
 if __name__ == "__main__":
     main()
