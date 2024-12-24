@@ -25,35 +25,101 @@ class CrashGameMonitor:
         self.history = []
         self.analyzing = False
         self.last_multiplier = 0.0
+        self.game_url = "https://1xbet.com/en/allgamesentrance/crash"
         
     def setup_driver(self):
-        """Setup Chrome WebDriver with appropriate options"""
+        """Setup and return a configured Chrome driver"""
         try:
             chrome_options = Options()
-            chrome_options.add_argument('--no-sandbox')
-            chrome_options.add_argument('--disable-dev-shm-usage')
-            chrome_options.add_argument('--disable-gpu')
-            chrome_options.add_argument("--window-size=1920,1080")
-            chrome_options.add_argument("--start-maximized")
-            chrome_options.add_argument('--headless=new')
-            
-            # Add stealth settings
             chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--start-maximized')
+            
+            # Add more realistic user agent
+            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+            
+            # Add additional preferences to avoid detection
             chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
             chrome_options.add_experimental_option('useAutomationExtension', False)
-            chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-
-            try:
-                service = Service()
-                self.driver = webdriver.Chrome(service=service, options=chrome_options)
-                self.wait = WebDriverWait(self.driver, 10)
-                return True
-            except Exception as e:
-                st.error(f"Failed to create Chrome WebDriver: {str(e)}")
-                return False
-                
+            
+            # Create driver with enhanced capabilities
+            driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+            
+            # Execute CDP commands to modify navigator.webdriver flag
+            driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+                "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            })
+            driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            
+            # Add stealth JS
+            stealth_js = """
+            // Overwrite the languages
+            Object.defineProperty(navigator, 'languages', {
+                get: () => ['en-US', 'en', 'es'],
+            });
+            
+            // Overwrite plugins
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [1, 2, 3, 4, 5],
+            });
+            
+            // Overwrite webdriver
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => false,
+            });
+            """
+            driver.execute_script(stealth_js)
+            
+            return driver
+            
         except Exception as e:
-            st.error(f"Failed to setup Chrome options: {str(e)}")
+            st.error(f"Error setting up browser: {str(e)}")
+            return None
+
+    def load_game(self):
+        """Load the crash game page with enhanced anti-detection"""
+        try:
+            if not self.driver:
+                self.driver = self.setup_driver()
+                if not self.driver:
+                    return False
+                    
+            # Clear cookies and cache first
+            self.driver.execute_cdp_cmd('Network.clearBrowserCookies', {})
+            self.driver.execute_cdp_cmd('Network.clearBrowserCache', {})
+            
+            # Load the page
+            self.driver.get(self.game_url)
+            time.sleep(3)  # Initial wait
+            
+            # Check if we hit any blocks
+            page_title = self.driver.title.lower()
+            if any(x in page_title for x in ['restricted', 'blocked', 'access denied']):
+                st.error("Access appears to be restricted. Trying to bypass...")
+                
+                # Try to bypass
+                self.driver.delete_all_cookies()
+                self.driver.refresh()
+                time.sleep(5)
+                
+                # Check again
+                if any(x in self.driver.title.lower() for x in ['restricted', 'blocked', 'access denied']):
+                    st.error("Still restricted. Please try using a different IP or waiting a while.")
+                    return False
+                    
+            # Additional checks for successful load
+            try:
+                WebDriverWait(self.driver, 10).until(
+                    lambda driver: driver.execute_script('return document.readyState') == 'complete'
+                )
+            except:
+                st.warning("Page load may not be complete, but continuing...")
+                
+            return True
+            
+        except Exception as e:
+            st.error(f"Error loading game: {str(e)}")
             return False
 
     def get_crash_value(self):
@@ -148,7 +214,8 @@ class CrashGameMonitor:
 
         try:
             st.info("Loading game page...")
-            self.driver.get("https://1xbet.com/en/allgamesentrance/crash")
+            if not self.load_game():
+                return
             
             # Wait for page to load
             time.sleep(5)
