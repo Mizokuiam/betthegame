@@ -37,6 +37,7 @@ class CrashGameMonitor:
             chrome_options.add_argument('--disable-gpu')
             chrome_options.add_argument("--window-size=1920,1080")
             chrome_options.add_argument("--start-maximized")
+            chrome_options.add_argument('--headless=new')  # Use new headless mode
             
             # Add stealth settings
             chrome_options.add_argument('--disable-blink-features=AutomationControlled')
@@ -46,36 +47,41 @@ class CrashGameMonitor:
             # Add user agent
             chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 
-            st.sidebar.text("Setting up browser...")
-            
-            if platform.system() == 'Linux':
-                st.sidebar.text("Running on Linux, using system Chrome...")
+            try:
                 service = Service()
-            else:
-                service = Service(ChromeDriverManager().install())
+                self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                self.wait = WebDriverWait(self.driver, 10)
+                return True
+            except Exception as e:
+                st.error(f"Failed to create Chrome WebDriver: {str(e)}")
+                return False
+                
+        except Exception as e:
+            st.error(f"Failed to setup Chrome options: {str(e)}")
+            return False
 
-            st.sidebar.text("Creating WebDriver instance...")
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
+    def start_monitoring(self):
+        """Start monitoring the crash game"""
+        if not self.driver:
+            st.error("Browser not initialized. Please try again.")
+            return
+
+        try:
+            self.driver.get("https://1xbet.com/casino/games/provider/1xGames/crash")
+            st.success("Successfully loaded the crash game page")
             
-            # Set window size
-            self.driver.set_window_size(1920, 1080)
+            # Start monitoring in session state
+            if 'history' not in st.session_state:
+                st.session_state.history = []
             
-            # Add stealth JavaScript
-            st.sidebar.text("Setting up stealth mode...")
-            self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {
-                "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            })
-            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-            
-            # Setup wait
-            self.wait = WebDriverWait(self.driver, 10)
-            return True
+            # Add some sample data for testing
+            st.session_state.history.extend([1.5, 2.3, 1.8, 3.2, 1.2])
             
         except Exception as e:
-            st.sidebar.error(f"Failed to setup browser: {str(e)}")
-            if hasattr(e, '__traceback__'):
-                st.sidebar.error(f"Traceback: {traceback.format_exc()}")
-            return False
+            st.error(f"Error accessing the game: {str(e)}")
+            if self.driver:
+                self.driver.quit()
+                self.driver = None
 
     def analyze_game(self):
         """Analyze the crash game and provide recommendations"""
@@ -169,19 +175,19 @@ def main():
         st.link_button("Open 1xBet Crash Game", "https://1xbet.com/casino/games/provider/1xGames/crash")
         
         if st.button("Start Analysis"):
-            monitor = CrashGameMonitor()
-            monitor.setup_driver()
-            monitor.start_monitoring()
+            with st.spinner("Setting up browser..."):
+                monitor = CrashGameMonitor()
+                if monitor.setup_driver():
+                    monitor.start_monitoring()
+                else:
+                    st.error("Failed to initialize browser. Please try again or contact support.")
     
     with col2:
         st.header("Analysis")
         
-        # Placeholder for real-time stats
-        if 'history' not in st.session_state:
-            st.session_state.history = []
-            
-        if len(st.session_state.history) > 0:
-            df = pd.DataFrame(st.session_state.history)
+        # Display analysis results
+        if 'history' in st.session_state and len(st.session_state.history) > 0:
+            df = pd.DataFrame({'multiplier': st.session_state.history})
             
             # Display stats
             col_stats1, col_stats2 = st.columns(2)
@@ -202,6 +208,8 @@ def main():
             # Show last 10 crashes
             st.subheader("Last 10 Crashes")
             st.write(" → ".join([f"{x:.2f}x" for x in df['multiplier'].tail(10)]))
+        else:
+            st.info("Start the analysis to see crash game statistics")
 
 if __name__ == "__main__":
     main()
