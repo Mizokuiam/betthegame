@@ -47,6 +47,7 @@ class CrashGameMonitor:
             from selenium.webdriver.chrome.service import Service
             from webdriver_manager.chrome import ChromeDriverManager
             from webdriver_manager.core.os_manager import ChromeType
+            import platform
 
             chrome_options = Options()
             chrome_options.add_argument('--headless')
@@ -58,16 +59,20 @@ class CrashGameMonitor:
             chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
             chrome_options.add_experimental_option('useAutomationExtension', False)
 
-            try:
-                # Try using system chrome driver first
-                service = Service()
-                self.driver = webdriver.Chrome(service=service, options=chrome_options)
-            except Exception as e:
-                st.warning(f"Using ChromeDriverManager as fallback: {str(e)}")
-                # Fallback to ChromeDriverManager
-                service = Service(ChromeDriverManager().install())
-                self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            # Check if running on Linux (Debian)
+            if platform.system() == 'Linux':
+                chrome_options.binary_location = "/usr/bin/chromium"
+                service = Service("/usr/bin/chromedriver")
+            else:
+                # For local development
+                try:
+                    service = Service()
+                    self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                except Exception as e:
+                    st.warning(f"Using ChromeDriverManager as fallback: {str(e)}")
+                    service = Service(ChromeDriverManager().install())
 
+            self.driver = webdriver.Chrome(service=service, options=chrome_options)
             self.wait = WebDriverWait(self.driver, 20)
             self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
                 'source': 'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
