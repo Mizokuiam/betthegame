@@ -82,24 +82,8 @@ class CrashGameMonitor:
             self.retry_count += 1
             st.info(f"Attempting to initialize browser (attempt {self.retry_count}/{self.max_retries})...")
             
-            # Check Chrome installation first
-            chrome_version = self.is_chrome_installed()
-            if not chrome_version:
-                st.error("Please install Google Chrome first")
-                return None
-                
             try:
-                # Use specific ChromeDriver version
-                st.info(f"Installing ChromeDriver for Chrome version {chrome_version}...")
-                driver_path = ChromeDriverManager(version=chrome_version).install()
-                
-                if not driver_path:
-                    st.error("Failed to get ChromeDriver path")
-                    return None
-                    
-                st.info(f"ChromeDriver installed at: {driver_path}")
-                
-                # Setup Chrome options
+                # Setup Chrome options first
                 chrome_options = Options()
                 chrome_options.add_argument('--disable-blink-features=AutomationControlled')
                 chrome_options.add_argument('--disable-dev-shm-usage')
@@ -123,11 +107,9 @@ class CrashGameMonitor:
                 chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
                 chrome_options.add_experimental_option('useAutomationExtension', False)
                 
-                # Create service and driver
-                st.info("Creating Chrome WebDriver...")
-                service = Service(executable_path=driver_path)
-                
-                driver = webdriver.Chrome(service=service, options=chrome_options)
+                # Let ChromeDriver handle version detection
+                st.info("Setting up ChromeDriver...")
+                driver = webdriver.Chrome(options=chrome_options)
                 driver.set_page_load_timeout(30)
                 
                 # Execute stealth scripts
