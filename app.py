@@ -61,36 +61,40 @@ class CrashGameMonitor:
             self.retry_count += 1
             st.info(f"Attempting to initialize browser (attempt {self.retry_count}/{self.max_retries})...")
             
-            # Setup options first
-            chrome_options = Options()
-            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-            chrome_options.add_argument('--disable-dev-shm-usage')
-            chrome_options.add_argument('--no-sandbox')
-            chrome_options.add_argument('--start-maximized')
-            chrome_options.add_argument('--ignore-certificate-errors')
-            chrome_options.add_argument('--ignore-ssl-errors')
-            chrome_options.add_argument('--disable-web-security')
-            chrome_options.add_argument('--allow-running-insecure-content')
-            
-            # Add user agent
-            user_agents = [
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0'
-            ]
-            user_agent = random.choice(user_agents)
-            chrome_options.add_argument(f'--user-agent={user_agent}')
-            
-            # Add experimental options
-            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            chrome_options.add_experimental_option('useAutomationExtension', False)
-            
             try:
-                # Setup ChromeDriver
-                driver_path = ChromeDriverManager().install()
-                service = Service(executable_path=driver_path)
+                # First try to get ChromeDriver
+                st.info("Installing ChromeDriver...")
+                driver_manager = ChromeDriverManager()
+                driver_path = driver_manager.install()
+                st.info(f"ChromeDriver installed at: {driver_path}")
                 
-                # Create driver
+                # Setup Chrome options
+                chrome_options = Options()
+                chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+                chrome_options.add_argument('--disable-dev-shm-usage')
+                chrome_options.add_argument('--no-sandbox')
+                chrome_options.add_argument('--start-maximized')
+                chrome_options.add_argument('--ignore-certificate-errors')
+                chrome_options.add_argument('--ignore-ssl-errors')
+                chrome_options.add_argument('--disable-web-security')
+                chrome_options.add_argument('--allow-running-insecure-content')
+                
+                # Add user agent
+                user_agents = [
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0'
+                ]
+                user_agent = random.choice(user_agents)
+                chrome_options.add_argument(f'--user-agent={user_agent}')
+                
+                # Add experimental options
+                chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+                chrome_options.add_experimental_option('useAutomationExtension', False)
+                
+                # Create service and driver
+                st.info("Creating Chrome WebDriver...")
+                service = Service(executable_path=driver_path)
                 driver = webdriver.Chrome(service=service, options=chrome_options)
                 driver.set_page_load_timeout(30)
                 
@@ -107,13 +111,21 @@ class CrashGameMonitor:
                 """
                 driver.execute_script(stealth_js)
                 
+                st.success("Chrome WebDriver initialized successfully!")
                 self.retry_count = 0  # Reset counter on success
                 return driver
                 
             except Exception as e:
-                st.error(f"Error creating WebDriver: {str(e)}")
+                st.error(f"Error during WebDriver setup: {str(e)}")
+                if "chrome not reachable" in str(e).lower():
+                    st.error("Chrome browser not responding. Please check if Chrome is running properly.")
+                elif "session not created" in str(e).lower():
+                    st.error("Failed to create browser session. Please check Chrome version compatibility.")
+                elif "chromedriver" in str(e).lower():
+                    st.error("ChromeDriver error. Please ensure Chrome is properly installed.")
+                
                 if self.retry_count < self.max_retries:
-                    st.info("Retrying...")
+                    st.info("Retrying browser initialization...")
                     time.sleep(2)
                     return self.setup_driver()
                 return None
