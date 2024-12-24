@@ -111,7 +111,7 @@ class CrashGameMonitor:
                 
                 # Create service with specific ChromeDriver version
                 st.info("Setting up ChromeDriver...")
-                service = Service(ChromeDriverManager(version="120.0.6099.109").install())
+                service = Service(ChromeDriverManager().install())
                 
                 # Initialize the driver with service and options
                 driver = webdriver.Chrome(service=service, options=chrome_options)
