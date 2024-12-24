@@ -103,19 +103,32 @@ class CrashGameMonitor:
             
             # Essential options
             chrome_options.add_argument('--no-sandbox')
-            chrome_options.add_argument('--headless=new')  # New headless mode
+            chrome_options.add_argument('--headless=new')
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--disable-gpu')
             
-            # Anti-detection options
+            # Enhanced anti-detection options
             chrome_options.add_argument('--disable-blink-features=AutomationControlled')
             chrome_options.add_argument('--disable-infobars')
             chrome_options.add_argument('--window-size=1920,1080')
             chrome_options.add_argument('--start-maximized')
-            chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
+            chrome_options.add_argument('--disable-extensions')
+            chrome_options.add_argument('--disable-popup-blocking')
+            chrome_options.add_argument('--disable-notifications')
+            chrome_options.add_argument('--disable-dev-tools')
+            chrome_options.add_argument('--ignore-certificate-errors')
+            chrome_options.add_argument('--enable-javascript')
+            
+            # Add proxy if available
+            proxy = os.getenv('HTTP_PROXY')
+            if proxy:
+                chrome_options.add_argument(f'--proxy-server={proxy}')
+                st.info(f"Using proxy: {proxy}")
+            
+            chrome_options.add_experimental_option('excludeSwitches', ['enable-automation', 'enable-logging'])
             chrome_options.add_experimental_option('useAutomationExtension', False)
             
-            # Random User-Agent
+            # Enhanced User-Agent list
             user_agents = [
                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
@@ -140,7 +153,6 @@ class CrashGameMonitor:
                 from webdriver_manager.chrome import ChromeDriverManager
                 from webdriver_manager.core.os_manager import ChromeType
                 
-                # Use ChromeDriverManager with the correct configuration
                 if "chromium" in browser_path.lower():
                     st.info("Using Chromium configuration")
                     driver_path = ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install()
@@ -153,18 +165,41 @@ class CrashGameMonitor:
                 service = Service(executable_path=driver_path)
                 self.driver = webdriver.Chrome(service=service, options=chrome_options)
                 
-                # Additional stealth configurations
+                # Enhanced stealth configurations
                 self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {"userAgent": user_agent})
-                self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
                 
-                # Add more stealth
+                # Advanced stealth JavaScript
                 stealth_js = """
+                    // Override navigator properties
+                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
                     Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-                    Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
-                    Object.defineProperty(navigator, 'permissions', {get: () => {return {query: () => Promise.resolve({state: 'granted'})}}});
+                    Object.defineProperty(navigator, 'plugins', {get: () => [
+                        {name: 'Chrome PDF Plugin'}, 
+                        {name: 'Chrome PDF Viewer'}, 
+                        {name: 'Native Client'}
+                    ]});
+                    Object.defineProperty(navigator, 'permissions', {get: () => ({
+                        query: () => Promise.resolve({state: 'granted'})
+                    })});
                     Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
+                    
+                    // Add WebGL support
+                    HTMLCanvasElement.prototype.getContext = ((orig) => {
+                        return function(type) {
+                            return orig.apply(this, arguments);
+                        };
+                    })(HTMLCanvasElement.prototype.getContext);
                 """
                 self.driver.execute_script(stealth_js)
+                
+                # Add additional headers
+                self.driver.execute_cdp_cmd('Network.setExtraHTTPHeaders', {
+                    'headers': {
+                        'Accept-Language': 'en-US,en;q=0.9',
+                        'Accept-Encoding': 'gzip, deflate, br',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+                    }
+                })
                 
                 st.success("Browser initialized successfully")
                 return True
@@ -201,22 +236,74 @@ class CrashGameMonitor:
             
             while retry_count < max_retries:
                 try:
-                    self.driver.get(self.game_url)
-                    time.sleep(random.uniform(3, 5))  # Random wait after page load
+                    # Set a new random user agent for each attempt
+                    user_agent = random.choice([
+                        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+                        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                    ])
+                    self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {"userAgent": user_agent})
                     
-                    # Check for common restriction indicators
+                    # Set random viewport size
+                    width = random.randint(1024, 1920)
+                    height = random.randint(768, 1080)
+                    self.driver.set_window_size(width, height)
+                    
+                    # Try loading the page
+                    self.driver.get(self.game_url)
+                    time.sleep(random.uniform(3, 5))
+                    
+                    # Check for various blocking indicators
                     page_source = self.driver.page_source.lower()
-                    if any(text in page_source for text in ['access denied', 'blocked', 'captcha', 'security check']):
+                    page_url = self.driver.current_url.lower()
+                    
+                    block_indicators = [
+                        'access denied', 'blocked', 'captcha', 'security check',
+                        'unusual traffic', 'automated', 'bot', 'javascript'
+                    ]
+                    
+                    if any(text in page_source for text in block_indicators) or \
+                       any(text in page_url for text in ['security', 'check', 'blocked']):
                         retry_count += 1
                         if retry_count < max_retries:
                             st.warning("Access appears to be restricted. Trying to bypass...")
-                            time.sleep(random.uniform(5, 10))  # Longer wait between retries
+                            
+                            # Additional bypass attempts
+                            self.driver.delete_all_cookies()
+                            self.driver.execute_cdp_cmd('Network.clearBrowserCookies', {})
+                            self.driver.execute_cdp_cmd('Network.clearBrowserCache', {})
+                            
+                            # Try to bypass with different headers
+                            self.driver.execute_cdp_cmd('Network.setExtraHTTPHeaders', {
+                                'headers': {
+                                    'Accept-Language': f'en-US,en;q=0.{random.randint(7,9)}',
+                                    'Accept-Encoding': 'gzip, deflate, br',
+                                    'Accept': '*/*',
+                                    'Connection': 'keep-alive',
+                                    'Sec-Fetch-Dest': 'document',
+                                    'Sec-Fetch-Mode': 'navigate',
+                                    'Sec-Fetch-Site': 'none',
+                                    'Sec-Fetch-User': '?1',
+                                    'Upgrade-Insecure-Requests': '1'
+                                }
+                            })
+                            
+                            time.sleep(random.uniform(5, 10))
                             continue
                         else:
                             st.error("Still restricted. Please try using a different IP or waiting a while.")
                             return False
                     
-                    return True
+                    # Check if page loaded successfully
+                    try:
+                        WebDriverWait(self.driver, 10).until(
+                            EC.presence_of_element_located((By.TAG_NAME, "body"))
+                        )
+                        st.success("Game page loaded successfully")
+                        return True
+                    except Exception as e:
+                        st.warning("Page might not be fully loaded, but continuing...")
+                        return True
                     
                 except Exception as e:
                     retry_count += 1
@@ -231,6 +318,7 @@ class CrashGameMonitor:
             
         except Exception as e:
             st.error(f"Error loading game page: {str(e)}")
+            traceback.print_exc()
             return False
 
     def get_crash_value(self):
