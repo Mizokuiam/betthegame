@@ -11,6 +11,11 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import json
 from pathlib import Path
+import platform
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.core.os_manager import ChromeType
+import traceback
 
 class CrashGameMonitor:
     def __init__(self):
@@ -44,61 +49,57 @@ class CrashGameMonitor:
             st.sidebar.error(f"Error saving history: {e}")
 
     def setup_driver(self):
-        """Initialize Chrome driver with headless mode for Streamlit Cloud"""
+        """Setup Chrome WebDriver with appropriate options"""
         try:
-            from selenium.webdriver.chrome.service import Service
-            from webdriver_manager.chrome import ChromeDriverManager
-            from webdriver_manager.core.os_manager import ChromeType
-            import platform
+            chrome_options = Options()
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--headless')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument("--window-size=1920,1080")
+            chrome_options.add_argument("--start-maximized")
+            
+            # Add stealth settings
+            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            chrome_options.add_experimental_option('useAutomationExtension', False)
+            
+            # Add user agent
+            chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 
             st.sidebar.text("Setting up browser...")
             
-            chrome_options = Options()
-            chrome_options.add_argument('--headless')
-            chrome_options.add_argument('--no-sandbox')
-            chrome_options.add_argument('--disable-dev-shm-usage')
-            chrome_options.add_argument('--disable-gpu')
-            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-            chrome_options.add_argument('--start-maximized')
-            chrome_options.add_argument('--ignore-certificate-errors')
-            chrome_options.add_argument('--ignore-ssl-errors')
-            chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
-            chrome_options.add_experimental_option('useAutomationExtension', False)
-
-            # Check if running on Linux (Debian)
             if platform.system() == 'Linux':
                 st.sidebar.text("Running on Linux, using system Chrome...")
-                chrome_options.binary_location = "/usr/bin/chromium"
-                service = Service("/usr/bin/chromedriver")
+                service = Service()
             else:
-                st.sidebar.text("Running on local machine...")
-                # For local development
-                try:
-                    service = Service()
-                    self.driver = webdriver.Chrome(service=service, options=chrome_options)
-                except Exception as e:
-                    st.warning(f"Using ChromeDriverManager as fallback: {str(e)}")
-                    service = Service(ChromeDriverManager().install())
+                service = Service(ChromeDriverManager().install())
 
             st.sidebar.text("Creating WebDriver instance...")
             self.driver = webdriver.Chrome(service=service, options=chrome_options)
-            self.wait = WebDriverWait(self.driver, 20)
             
+            # Set window size
+            self.driver.set_window_size(1920, 1080)
+            
+            # Add stealth JavaScript
             st.sidebar.text("Setting up stealth mode...")
-            self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
-                'source': 'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
+            self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+                "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             })
+            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             
+            # Setup wait
+            self.wait = WebDriverWait(self.driver, 10)
+            
+            # Test browser
             st.sidebar.text("Testing browser...")
-            self.driver.get("https://1xbet.com")
-            st.sidebar.text(f"Current URL: {self.driver.current_url}")
+            self.driver.get("https://1xbet.com/en/")
+            time.sleep(2)
             
-            st.success("Browser initialized successfully!")
             return True
         except Exception as e:
-            st.error(f"Failed to initialize browser: {str(e)}")
+            st.sidebar.error(f"Failed to setup browser: {str(e)}")
             if hasattr(e, '__traceback__'):
-                import traceback
                 st.sidebar.error(f"Traceback: {traceback.format_exc()}")
             return False
 
@@ -107,84 +108,9 @@ class CrashGameMonitor:
         try:
             st.sidebar.text("Attempting to log in...")
             
-            # Navigate to main page first
-            self.driver.get("https://1xbet.com/en/")
-            time.sleep(3)  # Wait longer for page load
-            
-            # Try to find and click the login button in the header
-            login_selectors = [
-                "[data-name='login']",  # Direct data attribute
-                ".header__auth [data-name='login']",  # Header auth section
-                ".header__auth a",  # Any auth link
-                "//a[contains(@data-name, 'login')]",  # XPath with data attribute
-                "//div[contains(@class, 'header__auth')]//a",  # Any auth link in header
-                ".login-button",  # Generic login class
-                "#loginButton"  # Possible ID
-            ]
-
-            clicked = False
-            for selector in login_selectors:
-                try:
-                    st.sidebar.text(f"Trying selector: {selector}")
-                    if selector.startswith("//"):
-                        # XPath
-                        login_button = self.wait.until(EC.element_to_be_clickable((By.XPATH, selector)))
-                    else:
-                        # CSS
-                        login_button = self.wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
-                    
-                    # Try multiple click methods
-                    try:
-                        # Direct click
-                        login_button.click()
-                    except:
-                        try:
-                            # JavaScript click
-                            self.driver.execute_script("arguments[0].click();", login_button)
-                        except:
-                            continue
-                    
-                    clicked = True
-                    st.sidebar.success(f"Successfully clicked login button using: {selector}")
-                    break
-                except Exception as e:
-                    continue
-
-            if not clicked:
-                # Try direct JavaScript injection to find and click login
-                st.sidebar.text("Trying JavaScript injection...")
-                js_show_login = """
-                    function findAndClickLogin() {
-                        // Try all possible login elements
-                        const selectors = [
-                            '[data-name="login"]',
-                            '.header__auth a',
-                            '.login-button',
-                            '#loginButton'
-                        ];
-                        
-                        for (const selector of selectors) {
-                            const elements = document.querySelectorAll(selector);
-                            for (const el of elements) {
-                                try {
-                                    el.click();
-                                    return true;
-                                } catch(e) {
-                                    continue;
-                                }
-                            }
-                        }
-                        return false;
-                    }
-                    return findAndClickLogin();
-                """
-                clicked = self.driver.execute_script(js_show_login)
-
-            if not clicked:
-                st.sidebar.error("Could not find login button")
-                return False
-
-            time.sleep(2)  # Wait for login form
+            # Navigate directly to login page
+            self.driver.get("https://1xbet.com/en/login/")
+            time.sleep(3)  # Wait for page load
 
             # Try to fill login form using JavaScript
             js_fill_login = f"""
@@ -194,12 +120,14 @@ class CrashGameMonitor:
                         'input[name="login"]',
                         'input[type="text"]',
                         'input[placeholder*="ID"]',
-                        'input[placeholder*="Email"]'
+                        'input[placeholder*="Email"]',
+                        '#auth_id_email'
                     ];
                     
                     const passwordSelectors = [
                         'input[name="password"]',
-                        'input[type="password"]'
+                        'input[type="password"]',
+                        '#auth-form-password'
                     ];
                     
                     let usernameField = null;
@@ -226,15 +154,21 @@ class CrashGameMonitor:
                     if (usernameField && passwordField) {{
                         // Fill in credentials
                         usernameField.value = '{username}';
+                        const usernameEvent = new Event('input', {{ bubbles: true }});
+                        usernameField.dispatchEvent(usernameEvent);
+                        
                         passwordField.value = '{password}';
+                        const passwordEvent = new Event('input', {{ bubbles: true }});
+                        passwordField.dispatchEvent(passwordEvent);
                         
                         // Find and click submit button
                         const submitSelectors = [
                             'button[type="submit"]',
-                            '.green-button',
+                            '.auth-button',
                             '.login-button',
                             'button.submit',
-                            'input[type="submit"]'
+                            'input[type="submit"]',
+                            'button.auth-button'
                         ];
                         
                         for (const selector of submitSelectors) {{
@@ -252,8 +186,30 @@ class CrashGameMonitor:
             
             form_filled = self.driver.execute_script(js_fill_login)
             if not form_filled:
-                st.sidebar.error("Could not fill login form")
-                return False
+                # Try alternative method using Selenium
+                try:
+                    # Find username field
+                    username_field = self.wait.until(EC.presence_of_element_located((
+                        By.CSS_SELECTOR, 'input[type="text"], input[name="login"], #auth_id_email'
+                    )))
+                    username_field.clear()
+                    username_field.send_keys(username)
+                    
+                    # Find password field
+                    password_field = self.wait.until(EC.presence_of_element_located((
+                        By.CSS_SELECTOR, 'input[type="password"], #auth-form-password'
+                    )))
+                    password_field.clear()
+                    password_field.send_keys(password)
+                    
+                    # Find and click submit button
+                    submit_button = self.wait.until(EC.element_to_be_clickable((
+                        By.CSS_SELECTOR, 'button[type="submit"], .auth-button, .login-button'
+                    )))
+                    submit_button.click()
+                except Exception as e:
+                    st.sidebar.error(f"Could not fill login form using Selenium: {str(e)}")
+                    return False
 
             time.sleep(3)  # Wait for login to complete
 
@@ -264,7 +220,8 @@ class CrashGameMonitor:
                     ".main-balance",
                     "//div[contains(@class, 'header-balance')]//span",
                     "//div[contains(text(), 'MAD')]",
-                    ".balance-value"
+                    ".balance-value",
+                    "#balance"
                 ]
                 
                 for selector in balance_selectors:
@@ -282,6 +239,7 @@ class CrashGameMonitor:
                             
                             # Navigate to crash game
                             self.driver.get("https://1xbet.com/en/allgamesentrance/crash")
+                            time.sleep(2)  # Wait for navigation
                             return True
                     except:
                         continue
@@ -295,7 +253,6 @@ class CrashGameMonitor:
         except Exception as e:
             st.sidebar.error(f"Login failed: {str(e)}")
             if hasattr(e, '__traceback__'):
-                import traceback
                 st.sidebar.error(f"Traceback: {traceback.format_exc()}")
             return False
 
