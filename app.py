@@ -85,19 +85,28 @@ class CrashGameMonitor:
             browser_path = self.get_browser_path()
             if browser_path:
                 chrome_options.binary_location = browser_path
+                st.info(f"Using Chrome browser at: {browser_path}")
+            else:
+                st.error("Chrome browser not found. Please install Chrome.")
+                return False
             
             try:
-                # Try using webdriver_manager
-                service = Service(ChromeDriverManager().install())
+                from selenium.webdriver.chrome.service import Service
+                from webdriver_manager.chrome import ChromeDriverManager
+                
+                # Force download of the latest ChromeDriver
+                driver_path = ChromeDriverManager(path=".").install()
+                st.info(f"ChromeDriver installed at: {driver_path}")
+                
+                service = Service(executable_path=driver_path)
+                self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                st.success("Browser initialized successfully")
+                return True
+                
             except Exception as e:
-                st.warning(f"Could not use webdriver_manager: {str(e)}")
-                # Fallback to local ChromeDriver if available
-                service = Service("chromedriver.exe")
-            
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
-            st.success("Browser initialized successfully")
-            return True
-            
+                st.error(f"Failed to initialize ChromeDriver: {str(e)}")
+                return False
+                
         except Exception as e:
             st.error(f"Error during WebDriver setup: {str(e)}")
             st.error("Please ensure Chrome browser is installed on your system")
