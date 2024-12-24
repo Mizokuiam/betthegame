@@ -20,6 +20,8 @@ class CrashGameMonitor:
         self.driver = None
         self.wait = None
         self.data_file = Path("crash_history.json")
+        self.balance = None
+        self.logged_in = False
         self.load_history()
 
     def load_history(self):
@@ -99,6 +101,67 @@ class CrashGameMonitor:
                 import traceback
                 st.sidebar.error(f"Traceback: {traceback.format_exc()}")
             return False
+
+    def login(self, username, password):
+        """Login to 1xBet"""
+        try:
+            st.sidebar.text("Attempting to log in...")
+            
+            # Navigate to main page first
+            self.driver.get("https://1xbet.com/en/")
+            time.sleep(2)
+            
+            # Click login button
+            try:
+                login_button = self.wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a.login")))
+                login_button.click()
+                time.sleep(1)
+            except Exception as e:
+                st.sidebar.error(f"Error clicking login button: {str(e)}")
+                return False
+
+            # Fill in credentials using JavaScript
+            js_login = f"""
+                document.querySelector('input[name="login"]').value = '{username}';
+                document.querySelector('input[name="password"]').value = '{password}';
+                document.querySelector('button[type="submit"]').click();
+            """
+            self.driver.execute_script(js_login)
+            time.sleep(3)
+
+            # Verify login success by checking balance
+            try:
+                balance_elem = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".header-balance-sum")))
+                self.balance = float(balance_elem.text.strip().replace('MAD', '').strip())
+                st.sidebar.success(f"Logged in successfully! Balance: {self.balance} MAD")
+                self.logged_in = True
+                return True
+            except Exception as e:
+                st.sidebar.error(f"Error verifying login: {str(e)}")
+                return False
+
+        except Exception as e:
+            st.sidebar.error(f"Login failed: {str(e)}")
+            return False
+
+    def get_balance(self):
+        """Get current balance"""
+        try:
+            balance_elem = self.driver.find_element(By.CSS_SELECTOR, ".header-balance-sum")
+            self.balance = float(balance_elem.text.strip().replace('MAD', '').strip())
+            return self.balance
+        except Exception as e:
+            st.sidebar.error(f"Error getting balance: {str(e)}")
+            return None
+
+    def calculate_bet_amount(self):
+        """Calculate recommended bet amount based on balance"""
+        if not self.balance:
+            return 3  # Default minimum bet
+        
+        # Conservative betting strategy (1-3% of balance)
+        base_bet = max(3, round(self.balance * 0.01, 2))  # Minimum 3 MAD
+        return min(base_bet, self.balance * 0.03)  # Maximum 3% of balance
 
     def monitor_game_state(self):
         """Monitor current game state and multiplier using JavaScript execution"""
@@ -222,21 +285,32 @@ class CrashGameMonitor:
         }
 
         # Detect trend
-        if all(recent_crashes[i] <= recent_crashes[i+1] for i in range(len(recent_crashes)-2)):
-            analysis['trend'] = 'increasing'
-        elif all(recent_crashes[i] >= recent_crashes[i+1] for i in range(len(recent_crashes)-2)):
-            analysis['trend'] = 'decreasing'
+        if len(recent_crashes) >= 3:
+            if all(recent_crashes[i] <= recent_crashes[i+1] for i in range(len(recent_crashes)-2)):
+                analysis['trend'] = 'increasing'
+            elif all(recent_crashes[i] >= recent_crashes[i+1] for i in range(len(recent_crashes)-2)):
+                analysis['trend'] = 'decreasing'
+
+        # Calculate bet amount based on balance
+        recommended_bet = self.calculate_bet_amount()
 
         # Generate recommendations
         if analysis['trend'] == 'decreasing':
-            analysis['target_multiplier'] = min(1.5, analysis['min'] * 0.9)
-            analysis['bet_amount'] = 3  # Conservative
+            analysis['target_multiplier'] = max(1.3, min(1.5, analysis['min'] * 0.9))
+            analysis['bet_amount'] = recommended_bet * 0.7  # More conservative
         elif analysis['trend'] == 'increasing':
-            analysis['target_multiplier'] = min(2.0, analysis['average'] * 0.8)
-            analysis['bet_amount'] = 10  # Aggressive
+            analysis['target_multiplier'] = max(1.5, min(2.0, analysis['average'] * 0.8))
+            analysis['bet_amount'] = recommended_bet  # Standard bet
         else:
-            analysis['target_multiplier'] = min(1.8, analysis['average'] * 0.7)
-            analysis['bet_amount'] = 5  # Moderate
+            analysis['target_multiplier'] = max(1.4, min(1.8, analysis['median'] * 0.85))
+            analysis['bet_amount'] = recommended_bet * 0.85  # Moderate
+
+        # Round bet amount to 2 decimal places
+        analysis['bet_amount'] = round(analysis['bet_amount'], 2)
+        
+        # Add win probability estimate
+        below_target = sum(1 for x in recent_crashes if x >= analysis['target_multiplier'])
+        analysis['win_probability'] = f"{(below_target / len(recent_crashes)) * 100:.1f}%"
 
         return analysis
 
@@ -248,22 +322,40 @@ def render_sidebar():
     if 'monitor' not in st.session_state:
         st.session_state.monitor = CrashGameMonitor()
         st.session_state.monitoring = False
+        st.session_state.logged_in = False
 
-    if not st.session_state.monitoring:
-        if st.sidebar.button("▶️ Start Monitoring"):
+    # Login section
+    if not st.session_state.logged_in:
+        st.sidebar.subheader("📝 Login")
+        username = st.sidebar.text_input("Login ID", type="password")
+        password = st.sidebar.text_input("Password", type="password")
+        
+        if st.sidebar.button("🔑 Login"):
             if st.session_state.monitor.setup_driver():
+                if st.session_state.monitor.login(username, password):
+                    st.session_state.logged_in = True
+                    st.rerun()
+
+    # Monitoring controls
+    if st.session_state.logged_in:
+        if not st.session_state.monitoring:
+            if st.sidebar.button("▶️ Start Monitoring"):
                 st.session_state.monitor.driver.get("https://1xbet.com/en/allgamesentrance/crash")
                 st.session_state.monitoring = True
                 st.rerun()
-    else:
-        if st.sidebar.button("⏹️ Stop Monitoring"):
-            if st.session_state.monitor.driver:
-                st.session_state.monitor.driver.quit()
-            st.session_state.monitoring = False
-            st.rerun()
+        else:
+            if st.sidebar.button("⏹️ Stop Monitoring"):
+                if st.session_state.monitor.driver:
+                    st.session_state.monitor.driver.quit()
+                st.session_state.monitoring = False
+                st.rerun()
 
-    # Add settings
-    st.sidebar.subheader("Settings")
+        # Show current balance
+        if st.session_state.monitor.balance:
+            st.sidebar.metric("💰 Balance", f"{st.session_state.monitor.balance} MAD")
+
+    # Settings
+    st.sidebar.subheader("⚙️ Settings")
     st.session_state.update_interval = st.sidebar.slider(
         "Update Interval (seconds)",
         min_value=0.1,
@@ -344,6 +436,7 @@ def render_analysis(analysis):
         - Target Multiplier: {analysis['target_multiplier']:.2f}x
         - Bet Amount: {analysis['bet_amount']} MAD
         - Strategy: {analysis['trend'].title()} trend detected
+        - Win Probability: {analysis['win_probability']}
         """)
 
 def main():
