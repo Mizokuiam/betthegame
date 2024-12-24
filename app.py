@@ -100,10 +100,31 @@ class CrashGameMonitor:
         """Initialize the Chrome browser with specific options"""
         try:
             chrome_options = Options()
+            
+            # Essential options
             chrome_options.add_argument('--no-sandbox')
-            chrome_options.add_argument('--headless')
+            chrome_options.add_argument('--headless=new')  # New headless mode
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--disable-gpu')
+            
+            # Anti-detection options
+            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+            chrome_options.add_argument('--disable-infobars')
+            chrome_options.add_argument('--window-size=1920,1080')
+            chrome_options.add_argument('--start-maximized')
+            chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
+            chrome_options.add_experimental_option('useAutomationExtension', False)
+            
+            # Random User-Agent
+            user_agents = [
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            ]
+            user_agent = random.choice(user_agents)
+            chrome_options.add_argument(f'--user-agent={user_agent}')
             
             # Get Chrome browser path
             browser_path = self.get_browser_path()
@@ -131,6 +152,20 @@ class CrashGameMonitor:
                 
                 service = Service(executable_path=driver_path)
                 self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                
+                # Additional stealth configurations
+                self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {"userAgent": user_agent})
+                self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                
+                # Add more stealth
+                stealth_js = """
+                    Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+                    Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+                    Object.defineProperty(navigator, 'permissions', {get: () => {return {query: () => Promise.resolve({state: 'granted'})}}});
+                    Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
+                """
+                self.driver.execute_script(stealth_js)
+                
                 st.success("Browser initialized successfully")
                 return True
                 
@@ -151,41 +186,51 @@ class CrashGameMonitor:
                 if not self.initialize_browser():
                     return False
                     
+            st.info("Loading game page...")
+            
             # Clear cookies and cache first
             self.driver.execute_cdp_cmd('Network.clearBrowserCookies', {})
             self.driver.execute_cdp_cmd('Network.clearBrowserCache', {})
             
-            # Load the page
-            self.driver.get(self.game_url)
-            time.sleep(3)  # Initial wait
+            # Add random delay before loading
+            time.sleep(random.uniform(2, 4))
             
-            # Check if we hit any blocks
-            page_title = self.driver.title.lower()
-            if any(x in page_title for x in ['restricted', 'blocked', 'access denied']):
-                st.error("Access appears to be restricted. Trying to bypass...")
-                
-                # Try to bypass
-                self.driver.delete_all_cookies()
-                self.driver.refresh()
-                time.sleep(5)
-                
-                # Check again
-                if any(x in self.driver.title.lower() for x in ['restricted', 'blocked', 'access denied']):
-                    st.error("Still restricted. Please try using a different IP or waiting a while.")
-                    return False
+            # Load the page with retry mechanism
+            max_retries = 3
+            retry_count = 0
+            
+            while retry_count < max_retries:
+                try:
+                    self.driver.get(self.game_url)
+                    time.sleep(random.uniform(3, 5))  # Random wait after page load
                     
-            # Additional checks for successful load
-            try:
-                WebDriverWait(self.driver, 10).until(
-                    lambda driver: driver.execute_script('return document.readyState') == 'complete'
-                )
-            except:
-                st.warning("Page load may not be complete, but continuing...")
-                
-            return True
+                    # Check for common restriction indicators
+                    page_source = self.driver.page_source.lower()
+                    if any(text in page_source for text in ['access denied', 'blocked', 'captcha', 'security check']):
+                        retry_count += 1
+                        if retry_count < max_retries:
+                            st.warning("Access appears to be restricted. Trying to bypass...")
+                            time.sleep(random.uniform(5, 10))  # Longer wait between retries
+                            continue
+                        else:
+                            st.error("Still restricted. Please try using a different IP or waiting a while.")
+                            return False
+                    
+                    return True
+                    
+                except Exception as e:
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        st.warning(f"Failed to load page (attempt {retry_count}). Retrying...")
+                        time.sleep(random.uniform(2, 4))
+                    else:
+                        st.error(f"Failed to load game page: {str(e)}")
+                        return False
+            
+            return False
             
         except Exception as e:
-            st.error(f"Error loading game: {str(e)}")
+            st.error(f"Error loading game page: {str(e)}")
             return False
 
     def get_crash_value(self):
