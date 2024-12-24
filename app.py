@@ -8,10 +8,13 @@ from datetime import datetime
 import time
 import threading
 import queue
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import undetected_chromedriver as uc
+from webdriver_manager.chrome import ChromeDriverManager
 import os
 import platform
 
@@ -71,13 +74,19 @@ st.markdown("""
 def initialize_driver():
     if st.session_state.driver is None:
         try:
-            options = uc.ChromeOptions()
-            options.headless = True
-            options.add_argument('--no-sandbox')
-            options.add_argument('--disable-dev-shm-usage')
+            chrome_options = Options()
+            chrome_options.add_argument('--headless=new')
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+            chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
+            chrome_options.add_experimental_option('useAutomationExtension', False)
             
             try:
-                driver = uc.Chrome(options=options, version_main=131)  # Specify your Chrome version
+                service = Service(ChromeDriverManager().install())
+                driver = webdriver.Chrome(service=service, options=chrome_options)
+                driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
                 driver.get("https://1xbet.com/en/allgamesentrance/crash")
                 st.session_state.driver = driver
                 time.sleep(5)  # Allow page to load
