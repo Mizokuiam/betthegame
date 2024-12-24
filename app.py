@@ -14,7 +14,8 @@ class CrashGameAnalyzer:
     def __init__(self):
         self.history = []
         self.model = None
-        self.scaler = MinMaxScaler()
+        self.X_scaler = MinMaxScaler()
+        self.y_scaler = MinMaxScaler()
         self.load_history()
 
     def load_history(self):
@@ -61,8 +62,8 @@ class CrashGameAnalyzer:
         y = np.array(y)
         
         # Scale the data
-        X_scaled = self.scaler.fit_transform(X)
-        y_scaled = self.scaler.transform(y.reshape(-1, 1)).ravel()
+        X_scaled = self.X_scaler.fit_transform(X)
+        y_scaled = self.y_scaler.fit_transform(y.reshape(-1, 1)).ravel()
         
         return X_scaled, y_scaled
 
@@ -98,11 +99,11 @@ class CrashGameAnalyzer:
         try:
             # Prepare last 10 points for prediction
             last_sequence = np.array(self.history[-10:]).reshape(1, -1)
-            last_sequence_scaled = self.scaler.transform(last_sequence)
+            last_sequence_scaled = self.X_scaler.transform(last_sequence)
             
             # Make prediction
             prediction_scaled = self.model.predict(last_sequence_scaled)
-            prediction = self.scaler.inverse_transform(prediction_scaled.reshape(-1, 1))
+            prediction = self.y_scaler.inverse_transform(prediction_scaled.reshape(-1, 1))
             
             return float(prediction[0][0])
         except Exception as e:
