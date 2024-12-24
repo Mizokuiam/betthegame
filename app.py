@@ -14,9 +14,6 @@ from pathlib import Path
 import platform
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
-from webdriver_manager.core.os_manager import ChromeType
-from webdriver_manager.microsoft import EdgeChromiumDriverManager
-from selenium.webdriver.edge.options import EdgeOptions
 import traceback
 import plotly.express as px
 import random
@@ -34,7 +31,7 @@ class CrashGameMonitor:
 
     @staticmethod
     def get_browser_path():
-        """Get the path to Chrome or Edge executable on Windows"""
+        """Get the path to Chrome executable on Windows"""
         # Check Chrome locations
         chrome_paths = [
             r"C:\Program Files\Google\Chrome\Application\chrome.exe",
@@ -46,31 +43,16 @@ class CrashGameMonitor:
             os.path.join(os.environ.get('PROGRAMFILES(X86)', ''), r"Google\Chrome\Application\chrome.exe")
         ]
         
-        # Check Edge locations as fallback
-        edge_paths = [
-            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-            os.path.join(os.environ.get('LOCALAPPDATA', ''), r"Microsoft\Edge\Application\msedge.exe"),
-            os.path.join(os.environ.get('PROGRAMFILES', ''), r"Microsoft\Edge\Application\msedge.exe"),
-            os.path.join(os.environ.get('PROGRAMFILES(X86)', ''), r"Microsoft\Edge\Application\msedge.exe")
-        ]
-        
         # Try Chrome first
         for path in chrome_paths:
             if os.path.exists(path):
                 st.info("Found Chrome browser")
-                return path, "chrome"
+                return path
                 
-        # Try Edge as fallback
-        for path in edge_paths:
-            if os.path.exists(path):
-                st.info("Found Edge browser")
-                return path, "edge"
-                
-        return None, None
+        return None
 
     def setup_driver(self):
-        """Setup and return a configured Chrome/Edge driver"""
+        """Setup and return a configured Chrome driver"""
         try:
             if self.retry_count >= self.max_retries:
                 st.error("Maximum retry attempts reached. Please try again later.")
@@ -79,37 +61,16 @@ class CrashGameMonitor:
             self.retry_count += 1
             st.info(f"Attempting to initialize browser (attempt {self.retry_count}/{self.max_retries})...")
             
-            # Get browser path
-            browser_path, browser_type = CrashGameMonitor.get_browser_path()
-            if not browser_path:
-                st.error("No compatible browser found. Please install Chrome or Edge.")
-                return None
-                
-            # Setup WebDriver manager based on browser type
-            try:
-                if browser_type == "chrome":
-                    driver_path = ChromeDriverManager().install()
-                else:  # edge
-                    driver_path = EdgeChromiumDriverManager().install()
-            except Exception as e:
-                st.error(f"Error installing WebDriver: {str(e)}")
-                return None
-            
-            # Setup options based on browser type
-            if browser_type == "chrome":
-                options = Options()
-            else:  # edge
-                options = EdgeOptions()
-                
-            options.binary_location = browser_path
-            options.add_argument('--disable-blink-features=AutomationControlled')
-            options.add_argument('--disable-dev-shm-usage')
-            options.add_argument('--no-sandbox')
-            options.add_argument('--start-maximized')
-            options.add_argument('--ignore-certificate-errors')
-            options.add_argument('--ignore-ssl-errors')
-            options.add_argument('--disable-web-security')
-            options.add_argument('--allow-running-insecure-content')
+            # Setup options first
+            chrome_options = Options()
+            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--start-maximized')
+            chrome_options.add_argument('--ignore-certificate-errors')
+            chrome_options.add_argument('--ignore-ssl-errors')
+            chrome_options.add_argument('--disable-web-security')
+            chrome_options.add_argument('--allow-running-insecure-content')
             
             # Add user agent
             user_agents = [
@@ -118,21 +79,19 @@ class CrashGameMonitor:
                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0'
             ]
             user_agent = random.choice(user_agents)
-            options.add_argument(f'--user-agent={user_agent}')
+            chrome_options.add_argument(f'--user-agent={user_agent}')
             
             # Add experimental options
-            options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            options.add_experimental_option('useAutomationExtension', False)
+            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            chrome_options.add_experimental_option('useAutomationExtension', False)
             
             try:
-                # Create service
-                if browser_type == "chrome":
-                    service = Service(executable_path=driver_path)
-                    driver = webdriver.Chrome(service=service, options=options)
-                else:  # edge
-                    service = Service(executable_path=driver_path)
-                    driver = webdriver.Edge(service=service, options=options)
-                    
+                # Setup ChromeDriver
+                driver_path = ChromeDriverManager().install()
+                service = Service(executable_path=driver_path)
+                
+                # Create driver
+                driver = webdriver.Chrome(service=service, options=chrome_options)
                 driver.set_page_load_timeout(30)
                 
                 # Execute stealth scripts
@@ -153,6 +112,10 @@ class CrashGameMonitor:
                 
             except Exception as e:
                 st.error(f"Error creating WebDriver: {str(e)}")
+                if self.retry_count < self.max_retries:
+                    st.info("Retrying...")
+                    time.sleep(2)
+                    return self.setup_driver()
                 return None
                 
         except Exception as e:
