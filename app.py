@@ -5,11 +5,16 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 import xgboost as xgb
 from datetime import datetime
-import requests
-from bs4 import BeautifulSoup
 import time
 import threading
 import queue
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
 
 # Page configuration
 st.set_page_config(
@@ -30,8 +35,8 @@ if 'last_prediction' not in st.session_state:
     st.session_state.last_prediction = None
 if 'auto_update' not in st.session_state:
     st.session_state.auto_update = False
-if 'data_queue' not in st.session_state:
-    st.session_state.data_queue = queue.Queue()
+if 'driver' not in st.session_state:
+    st.session_state.driver = None
 
 # Custom CSS
 st.markdown("""
@@ -64,29 +69,83 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+def initialize_driver():
+    if st.session_state.driver is None:
+        chrome_options = Options()
+        chrome_options.add_argument('--headless')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver.get("https://1xbet.com/en/allgamesentrance/crash")
+        st.session_state.driver = driver
+        time.sleep(5)  # Allow page to load
+
+def cleanup_driver():
+    if st.session_state.driver is not None:
+        st.session_state.driver.quit()
+        st.session_state.driver = None
+
 class CrashGamePredictor:
     def __init__(self):
         self.model = st.session_state.model
         self.scaler = st.session_state.scaler
     
     def scrape_latest_game(self):
-        """Simulate scraping the latest game data"""
+        """Scrape the latest crash point from 1xbet"""
         try:
-            # Simulated latest game data with more realistic values
-            crash_point = np.random.choice([
-                np.random.uniform(1.0, 2.0),  # 60% chance of low multiplier
-                np.random.uniform(2.0, 5.0),  # 30% chance of medium multiplier
-                np.random.uniform(5.0, 15.0)  # 10% chance of high multiplier
-            ], p=[0.6, 0.3, 0.1])
+            if st.session_state.driver is None:
+                initialize_driver()
+            
+            driver = st.session_state.driver
+            # Wait for the crash point element to be visible
+            crash_element = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div.crash__value"))
+            )
+            
+            # Extract the crash point value (remove the 'x' suffix)
+            crash_text = crash_element.text.strip()
+            if 'x' in crash_text:
+                crash_point = float(crash_text.replace('x', ''))
+            else:
+                crash_point = float(crash_text)
             
             latest_data = {
                 'timestamp': pd.Timestamp.now(),
-                'crash_point': round(crash_point, 4)
+                'crash_point': crash_point
             }
             return pd.Series(latest_data)
+            
         except Exception as e:
             st.error(f"Error scraping data: {str(e)}")
+            cleanup_driver()  # Reset driver on error
             return None
+
+    def predict_crash_point(self, current_data):
+        if self.model is None or len(current_data) < 5:
+            # Provide a simple prediction when not enough data
+            recent_crashes = current_data['crash_point'].tail(5)
+            predicted_value = max(1.1, min(2.0, recent_crashes.mean() * 0.9))
+            confidence = 50.0  # Lower confidence when no model
+            return predicted_value, confidence
+        
+        X, _ = self.prepare_features(current_data.tail(10))
+        if X is None:
+            return None, None
+            
+        X_latest = X.iloc[-1:].copy()
+        X_scaled = self.scaler.transform(X_latest)
+        
+        # Predict crash point range
+        predicted_value = self.model.predict(X_scaled)[0]
+        predicted_value = max(1.1, min(predicted_value, 10.0))  # Constrain prediction
+        
+        # Calculate confidence based on recent prediction accuracy
+        recent_predictions = current_data['crash_point'].tail(5)
+        confidence = max(0, min(100, 100 - recent_predictions.std() * 10))
+        
+        return predicted_value, confidence
 
     def prepare_features(self, data):
         if len(data) < 1:
@@ -130,30 +189,6 @@ class CrashGamePredictor:
         st.session_state.scaler = self.scaler
         return True
 
-    def predict_crash_point(self, current_data):
-        if self.model is None or len(current_data) < 5:
-            # Provide a simple prediction when not enough data
-            recent_crashes = current_data['crash_point'].tail(5)
-            predicted_value = max(1.1, min(2.0, recent_crashes.mean() * 0.9))
-            confidence = 50.0  # Lower confidence when no model
-            return predicted_value, confidence
-        
-        X, _ = self.prepare_features(current_data.tail(10))
-        if X is None:
-            return None, None
-            
-        X_latest = X.iloc[-1:].copy()
-        X_scaled = self.scaler.transform(X_latest)
-        
-        # Predict crash point range
-        predicted_value = self.model.predict(X_scaled)[0]
-        
-        # Calculate confidence based on recent prediction accuracy
-        recent_predictions = current_data['crash_point'].tail(5)
-        confidence = max(0, min(100, 100 - recent_predictions.std() * 10))
-        
-        return predicted_value, confidence
-
 def update_data():
     predictor = CrashGamePredictor()
     latest_data = predictor.scrape_latest_game()
@@ -188,6 +223,8 @@ def main():
         
         if auto_update != st.session_state.auto_update:
             st.session_state.auto_update = auto_update
+            if not auto_update:
+                cleanup_driver()
             st.experimental_rerun()
     
     # Main content area
@@ -246,3 +283,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # Cleanup on app shutdown
+    if st.session_state.driver is not None:
+        cleanup_driver()
