@@ -49,6 +49,8 @@ class CrashGameMonitor:
             from webdriver_manager.core.os_manager import ChromeType
             import platform
 
+            st.sidebar.text("Setting up browser...")
+            
             chrome_options = Options()
             chrome_options.add_argument('--headless')
             chrome_options.add_argument('--no-sandbox')
@@ -56,14 +58,18 @@ class CrashGameMonitor:
             chrome_options.add_argument('--disable-gpu')
             chrome_options.add_argument('--disable-blink-features=AutomationControlled')
             chrome_options.add_argument('--start-maximized')
+            chrome_options.add_argument('--ignore-certificate-errors')
+            chrome_options.add_argument('--ignore-ssl-errors')
             chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
             chrome_options.add_experimental_option('useAutomationExtension', False)
 
             # Check if running on Linux (Debian)
             if platform.system() == 'Linux':
+                st.sidebar.text("Running on Linux, using system Chrome...")
                 chrome_options.binary_location = "/usr/bin/chromium"
                 service = Service("/usr/bin/chromedriver")
             else:
+                st.sidebar.text("Running on local machine...")
                 # For local development
                 try:
                     service = Service()
@@ -72,39 +78,71 @@ class CrashGameMonitor:
                     st.warning(f"Using ChromeDriverManager as fallback: {str(e)}")
                     service = Service(ChromeDriverManager().install())
 
+            st.sidebar.text("Creating WebDriver instance...")
             self.driver = webdriver.Chrome(service=service, options=chrome_options)
             self.wait = WebDriverWait(self.driver, 20)
+            
+            st.sidebar.text("Setting up stealth mode...")
             self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
                 'source': 'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
             })
+            
+            st.sidebar.text("Testing browser...")
+            self.driver.get("https://1xbet.com")
+            st.sidebar.text(f"Current URL: {self.driver.current_url}")
             
             st.success("Browser initialized successfully!")
             return True
         except Exception as e:
             st.error(f"Failed to initialize browser: {str(e)}")
+            if hasattr(e, '__traceback__'):
+                import traceback
+                st.sidebar.error(f"Traceback: {traceback.format_exc()}")
             return False
 
     def monitor_game_state(self):
         """Monitor current game state and multiplier"""
         try:
+            if not self.driver:
+                st.error("Browser not initialized!")
+                return "error", None
+
+            # Navigate to page if not already there
+            current_url = self.driver.current_url
+            if "1xbet.com" not in current_url:
+                st.info("Navigating to 1xBet...")
+                self.driver.get("https://1xbet.com/en/allgamesentrance/crash")
+                time.sleep(2)  # Wait for page load
+
+            # Debug info
+            st.sidebar.text("Current URL: " + self.driver.current_url)
+            
             # Check game state
             try:
+                st.sidebar.text("Looking for crash-wrapper element...")
                 state_elem = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".crash-wrapper")))
-                if "preparing" in state_elem.get_attribute("class"):
+                class_attr = state_elem.get_attribute("class")
+                st.sidebar.text(f"Element classes: {class_attr}")
+                
+                if "preparing" in class_attr:
                     self.game_state = "preparing"
-                elif "flying" in state_elem.get_attribute("class"):
+                elif "flying" in class_attr:
                     self.game_state = "flying"
                 else:
                     self.game_state = "crashed"
-            except:
+            except Exception as e:
+                st.sidebar.error(f"Error finding game state: {str(e)}")
                 self.game_state = "unknown"
 
             # Get current multiplier
             try:
+                st.sidebar.text("Looking for multiplier element...")
                 multiplier_elem = self.driver.find_element(By.CSS_SELECTOR, ".multiplier")
                 multiplier_text = multiplier_elem.text.strip().replace('×', '')
+                st.sidebar.text(f"Found multiplier text: {multiplier_text}")
                 self.current_multiplier = float(multiplier_text)
-            except:
+            except Exception as e:
+                st.sidebar.error(f"Error finding multiplier: {str(e)}")
                 self.current_multiplier = None
 
             # Record crash value
@@ -169,13 +207,13 @@ def render_sidebar():
             if st.session_state.monitor.setup_driver():
                 st.session_state.monitor.driver.get("https://1xbet.com/en/allgamesentrance/crash")
                 st.session_state.monitoring = True
-                st.experimental_rerun()
+                st.rerun()
     else:
         if st.sidebar.button("⏹️ Stop Monitoring"):
             if st.session_state.monitor.driver:
                 st.session_state.monitor.driver.quit()
             st.session_state.monitoring = False
-            st.experimental_rerun()
+            st.rerun()
 
     # Add settings
     st.sidebar.subheader("Settings")
@@ -290,7 +328,7 @@ def main():
         
         # Auto-refresh
         time.sleep(st.session_state.update_interval)
-        st.experimental_rerun()
+        st.rerun()
     else:
         st.info("Click 'Start Monitoring' in the sidebar to begin analysis")
 
