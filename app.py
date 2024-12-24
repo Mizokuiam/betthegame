@@ -14,6 +14,7 @@ from pathlib import Path
 import platform
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.core.os_manager import ChromeType
 import traceback
 import plotly.express as px
 import random
@@ -116,9 +117,16 @@ class CrashGameMonitor:
             try:
                 from selenium.webdriver.chrome.service import Service
                 from webdriver_manager.chrome import ChromeDriverManager
+                from webdriver_manager.core.os_manager import ChromeType
                 
-                # Force download of the latest ChromeDriver
-                driver_path = ChromeDriverManager(path=".").install()
+                # Use ChromeDriverManager with the correct configuration
+                if "chromium" in browser_path.lower():
+                    st.info("Using Chromium configuration")
+                    driver_path = ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install()
+                else:
+                    st.info("Using Chrome configuration")
+                    driver_path = ChromeDriverManager().install()
+                    
                 st.info(f"ChromeDriver installed at: {driver_path}")
                 
                 service = Service(executable_path=driver_path)
@@ -128,6 +136,7 @@ class CrashGameMonitor:
                 
             except Exception as e:
                 st.error(f"Failed to initialize ChromeDriver: {str(e)}")
+                traceback.print_exc()
                 return False
                 
         except Exception as e:
