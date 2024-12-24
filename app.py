@@ -57,61 +57,88 @@ class CrashGameMonitor:
             return False
 
     def get_crash_value(self):
-        """Get the current crash value from the game"""
-        try:
-            # Try multiple possible selectors
-            selectors = [
-                ".crash-value",
-                ".multiplier",
-                ".current-multiplier",
-                "[data-role='multiplier']",
-                ".crash-multiplier",
-                "#crash-value",
-                ".game-multiplier"
-            ]
-            
-            for selector in selectors:
-                try:
-                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    if elements:
-                        for elem in elements:
-                            try:
-                                value_text = elem.text.strip()
-                                if 'x' in value_text.lower():
-                                    return float(value_text.lower().replace('x', '').strip())
-                            except:
-                                continue
-                except:
-                    continue
-                    
-            # If we couldn't find the value, let's get the page source for debugging
-            st.warning("Could not find crash value. Checking page source...")
-            page_source = self.driver.page_source
-            if "multiplier" in page_source.lower():
-                st.info("Found 'multiplier' in page source. Selector might need updating.")
-            
-            return None
-            
-        except Exception as e:
-            st.error(f"Error getting crash value: {str(e)}")
-            return None
-
-    def analyze_pattern(self):
-        """Analyze crash pattern and provide recommendation"""
-        if len(self.history) < 5:
-            return "Need more data for analysis"
-            
-        last_5 = self.history[-5:]
-        avg_5 = sum(last_5) / 5
+        """Get the current crash value from multiple possible selectors"""
+        selectors = [
+            '.crash-value', 
+            '.crash-multiplier',
+            '.multiplier-value',
+            '.game-value',
+            'div[class*="crash"] span[class*="value"]',
+            'div[class*="multiplier"] span[class*="value"]'
+        ]
         
-        if avg_5 < 1.8:
-            return "TAKE: High chance of bigger crash (2x+)"
-        elif all(x < 2 for x in last_5):
-            return "TAKE: Due for a high crash"
-        elif all(x > 2 for x in last_5):
-            return "WAIT: High crash streak, likely to break"
-        else:
-            return "MONITOR: No clear pattern"
+        for selector in selectors:
+            try:
+                element = WebDriverWait(self.driver, 2).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                )
+                value_text = element.text.strip()
+                if value_text and 'x' in value_text.lower():
+                    return float(value_text.lower().replace('x', '').strip())
+            except:
+                continue
+                
+        return None
+
+    def check_game_state(self):
+        """Check if game is in progress, waiting, or crashed"""
+        try:
+            # Check timer element for waiting state
+            timer = self.driver.find_element(By.CSS_SELECTOR, '.timer, .countdown, [class*="timer"], [class*="countdown"]')
+            if timer and timer.is_displayed():
+                time_text = timer.text.strip()
+                if time_text and any(x in time_text.lower() for x in ['sec', 's', 'seconds']):
+                    return 'waiting'
+        except:
+            pass
+            
+        try:
+            # Check crash animation/state
+            crash_elements = self.driver.find_elements(By.CSS_SELECTOR, '.crash-animation, .game-crash, [class*="crash"]')
+            for elem in crash_elements:
+                if elem.is_displayed():
+                    class_name = elem.get_attribute('class').lower()
+                    if any(x in class_name for x in ['crashed', 'end', 'finished']):
+                        return 'crashed'
+                    elif any(x in class_name for x in ['flying', 'active', 'progress']):
+                        return 'in_progress'
+        except:
+            pass
+            
+        return 'unknown'
+
+    def monitor_game(self):
+        """Monitor the crash game and return crash values and states"""
+        last_value = None
+        values = []
+        
+        while True:
+            try:
+                state = self.check_game_state()
+                current_value = self.get_crash_value()
+                
+                if state == 'crashed' and current_value and current_value != last_value:
+                    values.append(current_value)
+                    last_value = current_value
+                    st.write(f"Crash value: {current_value}x")
+                    
+                    # Analyze pattern
+                    if len(values) >= 5:
+                        last_5 = values[-5:]
+                        avg = sum(last_5) / 5
+                        if avg < 2.0:
+                            st.success("TAKE: Low values pattern detected")
+                        elif avg > 5.0:
+                            st.warning("WAIT: High values pattern detected")
+                        else:
+                            st.info("MONITOR: Normal pattern")
+                            
+                time.sleep(0.5)
+                
+            except Exception as e:
+                st.error(f"Error monitoring game: {str(e)}")
+                time.sleep(1)
+                continue
 
     def start_monitoring(self):
         """Start monitoring the crash game"""
@@ -151,35 +178,23 @@ class CrashGameMonitor:
             error_count = 0
             while self.analyzing:
                 try:
-                    current_value = self.get_crash_value()
-                    if current_value:
-                        error_count = 0  # Reset error count on success
-                        if current_value != self.last_multiplier:
-                            self.last_multiplier = current_value
-                            st.session_state.history.append(current_value)
-                            
-                            # Update analysis in real-time
-                            with placeholder:
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    st.metric("Last Crash", f"{current_value:.2f}x")
-                                    st.metric("Average (Last 5)", f"{sum(st.session_state.history[-5:])/5:.2f}x")
-                                with col2:
-                                    st.metric("Max Crash", f"{max(st.session_state.history):.2f}x")
-                                    st.metric("Low Crash %", f"{(sum(1 for x in st.session_state.history if x < 2)/len(st.session_state.history)*100):.1f}%")
-                            
-                            # Show recommendation
-                            with recommendation_placeholder:
-                                recommendation = self.analyze_pattern()
-                                st.info(f"💡 Recommendation: {recommendation}")
-                    else:
-                        error_count += 1
-                        if error_count >= 5:  # After 5 consecutive errors
-                            st.warning("Having trouble getting crash values. Refreshing page...")
-                            self.driver.refresh()
-                            time.sleep(5)
-                            error_count = 0
-                            
+                    self.monitor_game()
+                    
+                    # Update analysis in real-time
+                    with placeholder:
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("Last Crash", f"{self.last_multiplier:.2f}x")
+                            st.metric("Average (Last 5)", f"{sum(st.session_state.history[-5:])/5:.2f}x")
+                        with col2:
+                            st.metric("Max Crash", f"{max(st.session_state.history):.2f}x")
+                            st.metric("Low Crash %", f"{(sum(1 for x in st.session_state.history if x < 2)/len(st.session_state.history)*100):.1f}%")
+                    
+                    # Show recommendation
+                    with recommendation_placeholder:
+                        recommendation = self.analyze_pattern()
+                        st.info(f"💡 Recommendation: {recommendation}")
+                        
                 except Exception as e:
                     st.error(f"Error in monitoring loop: {str(e)}")
                     time.sleep(2)
@@ -198,6 +213,23 @@ class CrashGameMonitor:
         if self.driver:
             self.driver.quit()
             self.driver = None
+
+    def analyze_pattern(self):
+        """Analyze crash pattern and provide recommendation"""
+        if len(self.history) < 5:
+            return "Need more data for analysis"
+            
+        last_5 = self.history[-5:]
+        avg_5 = sum(last_5) / 5
+        
+        if avg_5 < 1.8:
+            return "TAKE: High chance of bigger crash (2x+)"
+        elif all(x < 2 for x in last_5):
+            return "TAKE: Due for a high crash"
+        elif all(x > 2 for x in last_5):
+            return "WAIT: High crash streak, likely to break"
+        else:
+            return "MONITOR: No clear pattern"
 
 def main():
     st.set_page_config(page_title="Crash Game Analyzer", layout="wide")
