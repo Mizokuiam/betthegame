@@ -18,6 +18,7 @@ from webdriver_manager.core.os_manager import ChromeType
 import traceback
 import plotly.express as px
 import random
+import os
 
 class CrashGameMonitor:
     def __init__(self):
@@ -29,6 +30,20 @@ class CrashGameMonitor:
         self.retry_count = 0
         self.max_retries = 3
 
+    def get_chrome_path():
+        """Get the path to Chrome executable on Windows"""
+        possible_paths = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            r"C:\Users\mrmiz\AppData\Local\Google\Chrome\Application\chrome.exe",
+        ]
+        
+        for path in possible_paths:
+            if os.path.exists(path):
+                return path
+                
+        return None
+
     def setup_driver(self):
         """Setup and return a configured Chrome driver"""
         try:
@@ -39,11 +54,22 @@ class CrashGameMonitor:
             self.retry_count += 1
             st.info(f"Attempting to initialize browser (attempt {self.retry_count}/{self.max_retries})...")
             
-            # Initialize ChromeDriverManager first
-            chrome_driver_path = ChromeDriverManager().install()
+            # Get Chrome path
+            chrome_path = CrashGameMonitor.get_chrome_path()
+            if not chrome_path:
+                st.error("Chrome browser not found. Please ensure Chrome is installed.")
+                return None
+                
+            # Setup ChromeDriverManager
+            try:
+                chrome_driver_path = ChromeDriverManager().install()
+            except Exception as e:
+                st.error(f"Error installing ChromeDriver: {str(e)}")
+                return None
             
             # Setup options
             chrome_options = Options()
+            chrome_options.binary_location = chrome_path
             chrome_options.add_argument('--disable-blink-features=AutomationControlled')
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--no-sandbox')
@@ -66,30 +92,34 @@ class CrashGameMonitor:
             chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
             chrome_options.add_experimental_option('useAutomationExtension', False)
             
-            # Create service with increased timeout
-            service = Service(chrome_driver_path)
-            service.start()
-            
-            # Create driver with timeout
-            driver = webdriver.Chrome(service=service, options=chrome_options)
-            driver.set_page_load_timeout(30)
-            
-            # Execute stealth scripts
-            driver.execute_cdp_cmd('Network.setUserAgentOverride', {"userAgent": user_agent})
-            driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-            
-            # Add stealth JS
-            stealth_js = """
-            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
-            Object.defineProperty(navigator, 'webdriver', {get: () => false});
-            Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
-            """
-            driver.execute_script(stealth_js)
-            
-            self.retry_count = 0  # Reset counter on success
-            return driver
-            
+            try:
+                # Create service
+                service = Service(executable_path=chrome_driver_path)
+                
+                # Create driver
+                driver = webdriver.Chrome(service=service, options=chrome_options)
+                driver.set_page_load_timeout(30)
+                
+                # Execute stealth scripts
+                driver.execute_cdp_cmd('Network.setUserAgentOverride', {"userAgent": user_agent})
+                driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                
+                # Add stealth JS
+                stealth_js = """
+                Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+                Object.defineProperty(navigator, 'webdriver', {get: () => false});
+                Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
+                """
+                driver.execute_script(stealth_js)
+                
+                self.retry_count = 0  # Reset counter on success
+                return driver
+                
+            except Exception as e:
+                st.error(f"Error creating Chrome driver: {str(e)}")
+                return None
+                
         except Exception as e:
             st.error(f"Error setting up browser (attempt {self.retry_count}/{self.max_retries}): {str(e)}")
             if self.retry_count < self.max_retries:
