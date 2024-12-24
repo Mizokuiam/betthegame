@@ -18,7 +18,6 @@ import traceback
 import plotly.express as px
 import random
 import os
-import winreg
 
 class CrashGameMonitor:
     def __init__(self):
@@ -32,29 +31,43 @@ class CrashGameMonitor:
 
     @staticmethod
     def get_browser_path():
-        """Get the path to Chrome executable on Windows"""
+        """Get the path to Chrome executable across different platforms"""
         try:
-            import winreg
-            # Try to get Chrome path from registry
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe") as key:
-                chrome_path = winreg.QueryValue(key, None)
-                if os.path.exists(chrome_path):
-                    return chrome_path
-
-            # Fallback to common installation paths
-            chrome_paths = [
-                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-                os.path.join(os.environ.get('LOCALAPPDATA', ''), r"Google\Chrome\Application\chrome.exe"),
-                os.path.join(os.environ.get('PROGRAMFILES', ''), r"Google\Chrome\Application\chrome.exe"),
-                os.path.join(os.environ.get('PROGRAMFILES(X86)', ''), r"Google\Chrome\Application\chrome.exe")
-            ]
+            system = platform.system().lower()
             
+            if system == "windows":
+                chrome_paths = [
+                    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                    os.path.join(os.environ.get('LOCALAPPDATA', ''), r"Google\Chrome\Application\chrome.exe"),
+                    os.path.join(os.environ.get('PROGRAMFILES', ''), r"Google\Chrome\Application\chrome.exe"),
+                    os.path.join(os.environ.get('PROGRAMFILES(X86)', ''), r"Google\Chrome\Application\chrome.exe")
+                ]
+            elif system == "linux":
+                chrome_paths = [
+                    "/usr/bin/google-chrome",
+                    "/usr/bin/google-chrome-stable",
+                    "/usr/bin/chromium-browser",
+                    "/usr/bin/chromium",
+                    "/snap/bin/chromium",
+                    "/snap/bin/google-chrome"
+                ]
+            elif system == "darwin":  # macOS
+                chrome_paths = [
+                    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                    "~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+                ]
+            else:
+                st.error(f"Unsupported operating system: {system}")
+                return None
+                
+            # Try all possible paths
             for path in chrome_paths:
-                if os.path.exists(path):
+                if os.path.exists(os.path.expanduser(path)):
+                    st.info(f"Found Chrome browser at: {path}")
                     return path
                     
-            # If no Chrome installation found
+            st.error(f"Chrome not found in common locations for {system}")
             return None
             
         except Exception as e:
@@ -94,11 +107,10 @@ class CrashGameMonitor:
             # Get Chrome browser path
             browser_path = self.get_browser_path()
             if not browser_path:
-                st.error("Chrome browser not found in common locations.")
-                st.info("Please make sure Google Chrome is installed on your system.")
+                st.error("Chrome browser not found. Please install Chrome or Chromium.")
+                st.info("For Linux, try: sudo apt-get install google-chrome-stable")
                 return False
                 
-            st.info(f"Using Chrome browser at: {browser_path}")
             chrome_options.binary_location = browser_path
             
             try:
