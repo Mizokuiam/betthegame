@@ -72,25 +72,48 @@ st.markdown("""
 
 def initialize_driver():
     if st.session_state.driver is None:
-        chrome_options = Options()
-        chrome_options.add_argument('--headless')
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-        
-        # Add Windows-specific Chrome paths
-        chrome_options.binary_location = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
-        if not os.path.exists(chrome_options.binary_location):
-            chrome_options.binary_location = "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
-        
         try:
-            service = Service(ChromeDriverManager().install())
+            chrome_options = Options()
+            chrome_options.add_argument('--headless=new')  # Updated headless mode syntax
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument('--disable-gpu')
+            
+            # Common Chrome installation paths on Windows
+            chrome_paths = [
+                "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+                "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+                os.path.expanduser("~") + "\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe"
+            ]
+            
+            chrome_found = False
+            for path in chrome_paths:
+                if os.path.exists(path):
+                    chrome_options.binary_location = path
+                    chrome_found = True
+                    break
+            
+            if not chrome_found:
+                st.error("Google Chrome not found in common installation paths.")
+                st.error("Please install Google Chrome and try again.")
+                return None
+            
+            service = Service(ChromeDriverManager(version="latest").install())
             driver = webdriver.Chrome(service=service, options=chrome_options)
-            driver.get("https://1xbet.com/en/allgamesentrance/crash")
-            st.session_state.driver = driver
-            time.sleep(5)  # Allow page to load
+            
+            try:
+                driver.get("https://1xbet.com/en/allgamesentrance/crash")
+                st.session_state.driver = driver
+                time.sleep(5)  # Allow page to load
+                return driver
+            except Exception as e:
+                st.error(f"Failed to load website: {str(e)}")
+                driver.quit()
+                return None
+                
         except Exception as e:
             st.error(f"Failed to initialize Chrome driver: {str(e)}")
-            st.error("Please make sure Google Chrome is installed on your system.")
+            st.error("Please make sure Google Chrome is installed and up to date.")
             return None
 
 def cleanup_driver():
@@ -106,31 +129,39 @@ class CrashGamePredictor:
     def scrape_latest_game(self):
         """Scrape the latest crash point from 1xbet"""
         try:
-            if st.session_state.driver is None:
-                initialize_driver()
-            
             driver = st.session_state.driver
+            if driver is None:
+                driver = initialize_driver()
+                if driver is None:
+                    return None
+        
             # Wait for the crash point element to be visible
-            crash_element = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "div.crash__value"))
-            )
-            
-            # Extract the crash point value (remove the 'x' suffix)
-            crash_text = crash_element.text.strip()
-            if 'x' in crash_text:
-                crash_point = float(crash_text.replace('x', ''))
-            else:
-                crash_point = float(crash_text)
-            
-            latest_data = {
-                'timestamp': pd.Timestamp.now(),
-                'crash_point': crash_point
-            }
-            return pd.Series(latest_data)
-            
+            try:
+                crash_element = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "div.crash__value"))
+                )
+                
+                # Extract the crash point value (remove the 'x' suffix)
+                crash_text = crash_element.text.strip()
+                if 'x' in crash_text:
+                    crash_point = float(crash_text.replace('x', ''))
+                else:
+                    crash_point = float(crash_text)
+                
+                latest_data = {
+                    'timestamp': pd.Timestamp.now(),
+                    'crash_point': crash_point
+                }
+                return pd.Series(latest_data)
+                
+            except Exception as e:
+                st.error(f"Error finding crash value: {str(e)}")
+                cleanup_driver()
+                return None
+                
         except Exception as e:
             st.error(f"Error scraping data: {str(e)}")
-            cleanup_driver()  # Reset driver on error
+            cleanup_driver()
             return None
 
     def predict_crash_point(self, current_data):
