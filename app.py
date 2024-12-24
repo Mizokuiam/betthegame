@@ -122,10 +122,34 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
+def get_chrome_path():
+    if platform.system() == "Windows":
+        # Common Chrome installation paths on Windows
+        paths = [
+            os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe")
+        ]
+        
+        for path in paths:
+            if os.path.exists(path):
+                return path
+                
+        st.error("Chrome not found. Please ensure Chrome is installed in the default location.")
+        return None
+    else:
+        st.error("This application currently supports Windows only.")
+        return None
+
 def initialize_driver():
     if st.session_state.driver is None:
         try:
+            chrome_path = get_chrome_path()
+            if not chrome_path:
+                return None
+                
             chrome_options = Options()
+            chrome_options.binary_location = chrome_path
             chrome_options.add_argument('--headless=new')
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
@@ -135,31 +159,7 @@ def initialize_driver():
             chrome_options.add_experimental_option('useAutomationExtension', False)
             
             try:
-                # Use ChromeDriverManager with specific Chrome version detection
-                chrome_version = None
-                if platform.system() == 'Windows':
-                    import winreg
-                    try:
-                        # Try to get Chrome version from registry
-                        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Google\Chrome\BLBeacon")
-                        chrome_version = winreg.QueryValueEx(key, "version")[0]
-                        winreg.CloseKey(key)
-                    except WindowsError:
-                        try:
-                            # Alternative registry path
-                            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Google Chrome")
-                            chrome_version = winreg.QueryValueEx(key, "Version")[0]
-                            winreg.CloseKey(key)
-                        except WindowsError:
-                            st.error("Chrome version not found in registry. Please ensure Chrome is installed.")
-                            return None
-
-                # Install ChromeDriver with specific version if found
-                if chrome_version:
-                    service = Service(ChromeDriverManager(version=chrome_version).install())
-                else:
-                    service = Service(ChromeDriverManager().install())
-
+                service = Service(ChromeDriverManager().install())
                 driver = webdriver.Chrome(service=service, options=chrome_options)
                 
                 # Add stealth mode JavaScript
